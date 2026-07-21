@@ -5,15 +5,15 @@
 > simulates the fold with physics accuracy, and lets you watch and edit the fold
 > live in 3D.
 
-FoldForge is built milestone by milestone, each independently runnable and
-useful. **All seven milestones (M0-M6) are implemented**, plus the capstone:
-**the Origamizer** — give it *any* 3D shape (a surface, a height field, even a
-photo) and it designs a pleated sheet that folds into it. Everything is pure
-numpy + matplotlib (plus Three.js for the studio) — no deep-learning framework —
-with gradients verified against finite differences.
+FoldForge is built milestone by milestone, each one runnable and useful on its
+own. **All seven milestones (M0-M6) are implemented**, plus the capstone:
+**the Origamizer**, which takes *any* 3D shape (a surface, a height field, even
+a photo) and designs a pleated sheet that folds into it. It's pure numpy +
+matplotlib (plus Three.js for the studio), no deep-learning framework, with
+gradients verified against finite differences.
 
 **The capstone: watch a flat sheet fold itself into a 3D dome** (folded result
-in beige, target surface in cyan — the fold lands on the target):
+in beige, target surface in cyan, the fold lands on the target):
 
 ![A flat sheet folding into a 3D dome](docs/img/origamize_fold.gif)
 
@@ -39,7 +39,7 @@ And the simulator folding a Miura-ori (rigid panels, ~1% strain):
 ![Metamaterial mechanics](docs/img/metamaterial.png)
 
 The differentiable core also includes an **exact, closed-form 2D Miura
-tessellation** (`diff/miura.py`) — isometric to machine precision and
+tessellation** (`diff/miura.py`). It's isometric to machine precision and
 inverse-designable: fold it to fit a target box at a target height.
 
 ![Exact differentiable Miura folding](docs/img/miura2d_fold.png)
@@ -47,14 +47,14 @@ inverse-designable: fold it to fit a target box at a target height.
 
 ---
 
-## ★ The Origamizer — fold any 3D shape
+## ★ The Origamizer: fold any 3D shape
 
-Hand it a target and it designs the pleated sheet that folds into it, by
+Hand it a target and it designs the pleated sheet that folds into it, using
 *corrugation through inverse design*: the sheet is modelled as parallel rigid
 fold-chains, and each chain's fold angles are solved (via the M2/M3
 differentiable core) to match the target's cross-section. The result is a real
 crease pattern (a FOLD file you can open in other origami tools) plus the folded
-geometry — and every intermediate fold is an exact rigid state, so the animation
+geometry. Every intermediate fold is an exact rigid state too, so the animation
 above genuinely folds onto the target.
 
 ```python
@@ -65,7 +65,7 @@ r.folded       # the folded 3D vertices
 r.error        # how closely the fold matches the target
 ```
 
-It folds **any input** through one path — a height field, an analytic surface,
+It folds **any input** through one path: a height field, an analytic surface,
 or a photo (brightness → relief):
 
 ```python
@@ -76,7 +76,7 @@ origamize_function(lambda x, y: x**2 - y**2)     # fold a saddle
 
 **Fold an animal from a photo.** `origamize_image` uses raw brightness (so the
 background folds too). To fold *the subject*, `origamize_silhouette` estimates
-its shape — segment it from the background (GrabCut), inflate the silhouette into
+its shape: segment it from the background (GrabCut), inflate the silhouette into
 a rounded bas-relief, then fold that:
 
 ```python
@@ -93,7 +93,7 @@ cat.jpg cat.fold --silhouette`, or `foldforge fold cat.jpg cat.stl` for a
 watertight solid in one step.)
 
 **Or estimate its actual relief.** Silhouette mode inflates the subject into a
-rounded balloon; monocular *depth* mode instead predicts genuine per-pixel
+rounded balloon. Monocular *depth* mode instead predicts genuine per-pixel
 distance with a depth network, masks it to the subject with the same GrabCut
 segmentation, and folds that. MiDaS small is the default (needs only PyTorch);
 DPT_Hybrid is a sharper opt-in (it needs `timm`).
@@ -104,19 +104,19 @@ result, relief = origamize_depth("zebra.jpg")                          # MiDaS_s
 result, relief = origamize_depth("zebra.jpg", model_type="DPT_Hybrid") # sharper edges
 ```
 
-On a zebra photo, silhouette inflation — now a rounded *spherical-cap* balloon,
-which reproduces a disc's analytic hemisphere ~14x more faithfully than the old
-`distance**0.5` law — folds to error 0.148; MiDaS depth folds to 0.239 — higher,
-because a fuller, more truthful relief carries more high-frequency detail than a
-single corrugation can reproduce, but it follows the animal's true near/far
-structure instead of a smooth blob. DPT_Hybrid resolves depth edges ~19% sharper
-than MiDaS small (at a similar fold error). Both need
-`pip install foldforge[depth]`; on the command line, `foldforge origamize
+On a zebra photo, silhouette inflation folds to error 0.148 (it's now a rounded
+*spherical-cap* balloon, which reproduces a disc's analytic hemisphere ~14x more
+faithfully than the old `distance**0.5` law). MiDaS depth folds to 0.239,
+higher, because a fuller, more truthful relief carries more high-frequency
+detail than a single corrugation can reproduce, but it follows the animal's true
+near/far structure instead of a smooth blob. DPT_Hybrid resolves depth edges
+~19% sharper than MiDaS small (at a similar fold error). Both need
+`pip install foldforge[depth]`. On the command line: `foldforge origamize
 zebra.jpg zebra.fold --depth [--depth-model DPT_Hybrid]`. Rendered proofs live in
 `examples/output/`.
 
-**Match a subject's sides (`symmetry=`).** A real photo of a symmetric subject —
-a butterfly, a face-on animal — is almost never shot perfectly square-on, so the
+**Match a subject's sides (`symmetry=`).** A real photo of a symmetric subject
+(a butterfly, a face-on animal) is almost never shot perfectly square-on, so the
 estimated relief comes out lopsided (one wing bigger than the other). Pass
 `symmetry="auto"` to detect the subject's best mirror axis, align it to vertical,
 and average the relief with its mirror so both sides match; `"x"`/`"y"` force
@@ -132,7 +132,7 @@ result, relief = origamize_silhouette("butterfly.jpg", symmetry="y",
 
 On the blue-morpho sample, a 9-degree camera tilt drives the height field's
 left/right mirror-RMSE to 0.385; `symmetry="auto"` recovers the axis and drops it
-to 0.000 — the wings come out identical. On the command line:
+to 0.000, and the wings come out identical. On the command line:
 `foldforge fold butterfly.jpg butterfly.stl --engine miura2d --symmetry auto`.
 Before/after figures: `examples/output/butterfly_symmetry.png` and
 `butterfly_offaxis_symmetry.png`.
@@ -157,7 +157,7 @@ each land on its target.
 
 ---
 
-## ★★ The 2D origamizer — a genuine crease pattern (`--engine miura2d`)
+## ★★ The 2D origamizer: a genuine crease pattern (`--engine miura2d`)
 
 The corrugation above folds each row of the height field as an **independent**
 1D pleat chain. Every strip reproduces its own cross-section, but the strips are
@@ -166,12 +166,12 @@ not one sheet: the single crease pattern that path can honestly return is an
 not a dome**. That is the 1D bound.
 
 The `miura2d` engine breaks it. It fits a genuine **2D warped-Miura
-tessellation** — two crease families meeting at degree-4 vertices, the way real
+tessellation**: two crease families meeting at degree-4 vertices, the way real
 origami-tessellation surface approximations (Tachi's freeform Miura) work. The
 folded vertices and the flat crease pattern are optimised *together* (Adam over
-the same edge-length / vertex quantities the differentiable core already uses) so
-that the folded **mid-surface tracks the target** while every folded edge keeps
-its flat length (a near-rigid fold) and every facet stays planar. Because a flat
+the same edge-length / vertex quantities the differentiable core already uses).
+The folded **mid-surface tracks the target**, every folded edge keeps its flat
+length (a near-rigid fold), and every facet stays planar. Because a flat
 (developable) sheet has zero Gaussian curvature, a curved target cannot be hit
 with *zero* strain; the residual fold strain is **measured and reported**, not
 hidden.
@@ -194,11 +194,11 @@ foldforge fold      cat.jpg cat.stl --engine miura2d    # photo -> true-2D folde
 foldforge origamize zebra.jpg zebra.fold --engine miura2d
 ```
 
-**Fidelity — it wins clearly on every curved subject.** The metric is one
+**Fidelity: it wins clearly on every curved subject.** The metric is one
 callable (`surface_fit_error`): the normalised RMSE of the folded **mid-surface**
 against the target height field after a best scale + offset alignment, run
 **identically** on both engines. For the corrugation it scores the *coherent
-single-sheet* fold of its returned pattern (the extrusion) — the honest
+single-sheet* fold of its returned pattern (the extrusion), the honest
 like-for-like comparison of "fold the one crease pattern each engine hands you".
 
 | target | corrugation (1D) | **miura2d (2D)** | miura2d fold strain (mean / max) |
@@ -211,8 +211,8 @@ like-for-like comparison of "fold the one crease pattern each engine hands you".
 | dog (photo) | 0.278 | **0.015** | 0.29% / 2.2% |
 | elephant (photo) | 0.290 | **0.011** | 0.20% / 1.1% |
 
-(Roughly 8–200× lower mid-surface error across these targets — the low end is
-the gentlest relief, the high end the least-favourable corrugation reading; the
+(Mid-surface error is 8-200× lower across these targets: the low end is
+the gentlest relief, the high end the least-favourable corrugation reading. The
 comparison basis is the single sheet each engine actually returns, scored by the
 identical metric. Reproduce with `pytest tests/test_miura2d_fit.py` and
 `compare_engines`.)
@@ -221,13 +221,13 @@ identical metric. Reproduce with `pytest tests/test_miura2d_fit.py` and
 developable) with real mountain/valley creases *and* the triangulating facet
 diagonals, all exported to layered SVG (diagonals on their own facet layer) and
 FOLD. Because those diagonals are exported, every face in the FOLD file is a
-triangle, so each exported panel is planar to machine precision — the folded
-pattern matches the geometry (the earlier quad export bowed ~1.5 cm out of plane
-on a 24 cm sheet). The fold is near-rigid — mean edge strain ≈ 0.2–0.5%, on par
+triangle, so each exported panel is planar to machine precision (the folded
+pattern matches the geometry: the earlier quad export bowed ~1.5 cm out of plane
+on a 24 cm sheet). The fold is near-rigid: mean edge strain ≈ 0.2-0.5%, on par
 with the simulator's own rigid Miura (~0.6%), with the worst strain concentrated
 where the target's curvature is highest; max strain is typically below ~5% but
-runs higher (up to ~6–7%) at extreme aspect ratios or curvature peaks, and the
-engine warns when it does. It is **not flat-foldable** (Kawasaki fails) —
+runs higher (up to ~6-7%) at extreme aspect ratios or curvature peaks, and the
+engine warns when it does. It is **not flat-foldable** (Kawasaki fails),
 correctly so: a curved relief cannot also collapse flat. The corrugation's
 single profile *is* flat-foldable, but only because it is a ridge. A `miura2d`
 `.fold` loads and folds live in the studio (in-browser PBD solver, ~2% bar
@@ -235,7 +235,7 @@ strain).
 
 **Still honest about the ceiling.** This is relief / tessellation origami: a
 warped Miura whose corrugation absorbs the target's Gaussian curvature. It is
-**not** Origamizer arbitrary-3D tuck-folding — it approximates height fields
+**not** Origamizer arbitrary-3D tuck-folding: it approximates height fields
 (and photo reliefs), not closed surfaces or overhangs, and it trades a little
 fold strain for the huge fidelity gain rather than being an *exact* rigid fold.
 
@@ -246,17 +246,17 @@ fold strain for the huge fidelity gain rather than being an *exact* rigid fold.
 A solver that takes a flat crease pattern and **folds it into 3D**, after
 Ghassaei, Demaine & Gershenfeld's Origami Simulator (2018):
 
-- **Rigid-panel mesh** — faces become triangles held rigid by stiff length
+- **Rigid-panel mesh**: faces become triangles held rigid by stiff length
   springs; creases and the triangulation diagonals become hinges.
-- **Dynamic-relaxation fold** — hinge forces drive each crease toward a target
+- **Dynamic-relaxation fold**: hinge forces drive each crease toward a target
   fold angle while length projection keeps the panels rigid; the fold is ramped
   flat → folded and a snapshot saved per stage.
-- **Actuation** — rigid origami is a mechanism, so you can drive one crease
+- **Actuation**: rigid origami is a mechanism, so you can drive one crease
   family and let the rest follow (`creases_along_x`), giving the clean uniform
   Miura fold.
-- **Built-in rigidity check** — every result carries the worst per-face strain;
+- **Built-in rigidity check**: every result carries the worst per-face strain;
   the Miura and waterbomb both fold at well under 1% strain.
-- **Verified crease math** — the dihedral-angle gradient the forces rest on is
+- **Verified crease math**: the dihedral-angle gradient the forces rest on is
   checked against finite differences in the test suite (and sets up M2).
 
 ```python
@@ -286,15 +286,15 @@ fine for this stage.
 
 A small, clean library for working with *flat* crease patterns:
 
-- **Read/write the FOLD format** — the JSON standard for crease patterns
+- **Read/write the FOLD format**: the JSON standard for crease patterns
   (`github.com/edemaine/fold`), so FoldForge files open in other origami tools.
-- **A crease-graph model** (`CreasePattern`) — vertices, edges with
+- **A crease-graph model** (`CreasePattern`): vertices, edges with
   mountain/valley/border assignments, faces, and the geometric query everything
   leans on: the *sector angles* around each vertex.
-- **Foldability validators** — Kawasaki's and Maekawa's theorems, checked per
+- **Foldability validators**: Kawasaki's and Maekawa's theorems, checked per
   interior vertex and rolled up into a whole-pattern verdict.
-- **A flat-pattern renderer** — mountains red, valleys blue, border black.
-- **Built-in example generators** — Miura-ori, a single-vertex pattern, and the
+- **A flat-pattern renderer**: mountains red, valleys blue, border black.
+- **Built-in example generators**: Miura-ori, a single-vertex pattern, and the
   waterbomb base.
 
 Here is the Miura-ori it generates, validates, and renders:
@@ -335,12 +335,12 @@ foldforge fold cat.jpg cat.stl --detail rough      # preset alias: rough=12 / me
 foldforge fold cat.jpg cat.stl --style origami     # low-poly folded-paper facets
 ```
 
-- **`--folds N`** sets how many creases span the subject's longer side — lower is
+- **`--folds N`** sets how many creases span the subject's longer side: lower is
   rougher and simpler, higher is finer (default ~40); `--detail rough|medium|fine`
   are presets for 12/24/40.
 - **`--style`** picks **`smooth`** (default: a rounded, inflated relief) or
   **`origami`** (posterises the relief into a few large flat facets with sharp,
-  straight creases — a low-poly folded-paper look).
+  straight creases, a low-poly folded-paper look).
 
 Add `--depth` for monocular-depth relief or `--open-sheet` for the one-sided
 sheet. It prints a short summary:
@@ -353,7 +353,7 @@ Folded cat.jpg -> cat.stl  (silhouette, smooth style, folds=40)
 ```
 
 **Or fold live in the browser:** open `studio/index.html` and **drag a photo**
-(or a `.fold` file) **onto it** — or pick a built-in shape (dome, saddle, ridge,
+(or a `.fold` file) **onto it**, or pick a built-in shape (dome, saddle, ridge,
 two-peaks, Miura) and scrub the fold slider. No build step, no server.
 
 **In Python:**
@@ -390,17 +390,17 @@ foldforge export zebra.fold zebra.svg             # layered SVG/DXF for a cutter
 
 ## Run the demos
 
-- **M0 notebook:** `notebooks/M0_geometry.ipynb` — patterns, foldability, and
+- **M0 notebook:** `notebooks/M0_geometry.ipynb`: patterns, foldability, and
   catching a corrupted Miura.
-- **M1 notebook:** `notebooks/M1_simulator.ipynb` — folds the Miura and waterbomb
+- **M1 notebook:** `notebooks/M1_simulator.ipynb`: folds the Miura and waterbomb
   into 3D and plots the strain history (the rigidity proof).
-- **M2–M5 notebook:** `notebooks/M2-M5_design_pipeline.ipynb` — differentiable
+- **M2-M5 notebook:** `notebooks/M2-M5_design_pipeline.ipynb`: differentiable
   kinematics, inverse design, the generative model, and the metamaterial
   mechanics, end to end. (All outputs are embedded, so you can read without running.)
-- **Web studio (M6):** open `studio/index.html` in any browser — drag to rotate,
+- **Web studio (M6):** open `studio/index.html` in any browser, drag to rotate,
   scrub the fold slider, watch the built-in shapes fold, or **drag a photo / `.fold`
   file onto the window** to fold your own.
-- **Sample gallery:** `python examples/make_samples.py` — folds four sample
+- **Sample gallery:** `python examples/make_samples.py` folds four sample
   animals (cat, dog, elephant, blue morpho butterfly) from `examples/samples/`
   into closed printable solids and renders `examples/output/animals_showcase.png`
   (photo → segmented height-field heatmap → folded solid, one row per animal).
@@ -409,7 +409,7 @@ foldforge export zebra.fold zebra.svg             # layered SVG/DXF for a cutter
   [Labrador Retriever portrait.jpg](https://commons.wikimedia.org/wiki/File:Labrador_Retriever_portrait.jpg),
   [African Bush Elephant.jpg](https://commons.wikimedia.org/wiki/File:African_Bush_Elephant.jpg),
   [Morpho didius Male Dos MHNT.jpg](https://commons.wikimedia.org/wiki/File:Morpho_didius_Male_Dos_MHNT.jpg).
-- **Tests:** `pytest -q` — 149 tests across all milestones (plus one that skips
+- **Tests:** `pytest -q` runs 149 tests across all milestones (plus one that skips
   when JAX isn't installed): the two theorems, FOLD round-tripping, the
   dihedral-gradient and kinematics finite-difference checks, the implicit
   gradient and its analytic sparse Hessian against finite differences, fold
@@ -435,7 +435,7 @@ number of mountain folds minus the number of valley folds is exactly `+2` or
 `-2`.
 
 **Honesty note.** These are *necessary*, not *sufficient*. Failing either proves
-a pattern can't fold flat. Passing both is a strong signal but not a proof — the
+a pattern can't fold flat. Passing both is a strong signal but not a proof: the
 paper's layers can still collide globally. The waterbomb base example exists to
 show the validators correctly saying "no": it passes Kawasaki (all 45° wedges)
 but fails Maekawa, because it's a 3D base, not a flat fold.
@@ -483,8 +483,8 @@ tests/                # pytest suite (149 tests)
 docs/img/             # rendered patterns, fold stages, GIFs, design figures
 ```
 
-Core dependencies are **numpy + matplotlib only** — no deep-learning framework;
-the kinematics, the generative model's backprop, the implicit-function-theorem
+Core dependencies are **numpy + matplotlib only**, no deep-learning framework.
+The kinematics, the generative model's backprop, the implicit-function-theorem
 gradients, and the optimisers are all hand-written numpy, with gradients verified
 against finite differences. **JAX is an optional backend** (`pip install jax`)
 that reproduces those gradients automatically and runs on GPU.
@@ -506,46 +506,46 @@ that reproduces those gradients automatically and runs on GPU.
 ## Beyond the roadmap
 
 Since the seven milestones, FoldForge has grown the capabilities its own
-roadmap called for next — all tested:
+roadmap called for next, all tested:
 
-- **Fabrication export** (`fabricate/`) — write any crease pattern to layered
+- **Fabrication export** (`fabricate/`): write any crease pattern to layered
   **SVG/DXF** (mountain=red, valley=blue, border/cut=black) ready for a laser or
   vinyl cutter. `foldforge origamize photo.png out.fold` then export to cut it.
-- **Wilder shapes** (`origamize/shapes.py`) — fold **text/logos**, **procedural
+- **Wilder shapes** (`origamize/shapes.py`): fold **text/logos**, **procedural
   terrain**, and **OBJ meshes**, on top of images and surfaces. Gallery:
 
   ![Wild shapes folded](docs/img/wild_gallery.png)
 
-- **Self-intersection detection** (`sim/collision.py`) — spatial-hash broad
+- **Self-intersection detection** (`sim/collision.py`): spatial-hash broad
   phase + triangle/triangle narrow phase flags panels that pass through each
   other, with an optional soft repulsion (`fold(..., avoid_intersection=True)`).
-- **Collision-aware fold sequencing** (`sim/sequencing.py`) — searches an order
+- **Collision-aware fold sequencing** (`sim/sequencing.py`): searches an order
   in which to fold the creases so panels get out of each other's way, scoring
   trial folds with the collision detector. Greedy by default; a `beam_width`
   turns on beam search, which keeps several partial orderings alive and never
   returns a worse ordering than greedy. It's a heuristic search, not an
   exhaustive proof of a collision-free order.
-- **Implicit differentiation of the general solver** (`diff/implicit.py`) —
+- **Implicit differentiation of the general solver** (`diff/implicit.py`):
   gradients through the folded *equilibrium* of an arbitrary crease graph via the
   implicit function theorem (one linear solve at the fixed point), verified
   against finite differences. The Hessian for that solve is now assembled
-  analytically and sparsely — `O(V)` rather than `O(V^2)`, matching the old
+  analytically and sparsely, `O(V)` rather than `O(V^2)`, matching the old
   finite-difference Hessian to ~1e-8 and running 7-14x faster at 48-108 DOFs
   (the gap widens with size). This closes the "general solver isn't
   differentiable" gap.
-- **Optional JAX backend** (`jaxsim/`) — the pure-numpy core ports to
+- **Optional JAX backend** (`jaxsim/`): the pure-numpy core ports to
   `jax.numpy`, so `jax.grad` reproduces the hand-derived gradients automatically
   (exact to 1e-9) and runs on GPU.
-- **Folded-3D export** (`fabricate/to_obj` / `to_stl` / `to_gltf`) — save the
+- **Folded-3D export** (`fabricate/to_obj` / `to_stl` / `to_gltf`): save the
   folded shape as OBJ, STL, or a self-contained glTF `.glb` (written by hand, no
   new dependency) to 3D-print it or open it in any viewer (`OrigamiResult`
   carries its triangles). OBJ and glTF can tint each vertex by the crease type it
   touches (mountain red, valley blue). Crease patterns still export to layered
   SVG/DXF for cutters.
-- **Faster solver** — the length-projection hot loop runs as sparse matrix
+- **Faster solver**: the length-projection hot loop runs as sparse matrix
   multiplies when SciPy is present (~2x on large patterns), byte-identical to the
   numpy path, with a clean numpy fallback.
-- **Richer animal folding** — `origamize_silhouette` blends the inflated
+- **Richer animal folding**: `origamize_silhouette` blends the inflated
   silhouette with edge-preserving interior shading (`detail=`), so the folded
   subject shows surface features instead of a smooth blob; `origamize_depth`
   goes further and folds a monocular *depth* prediction (MiDaS small, or
@@ -553,15 +553,15 @@ roadmap called for next — all tested:
   real zebra photo (`examples/output/`): silhouette fold error 0.148, MiDaS
   depth 0.239.
 - **Web studio upgrades** (`studio/index.html`, regenerated by
-  `examples/make_studio.py`) — drop in your own photo and watch it fold in the
+  `examples/make_studio.py`): drop in your own photo and watch it fold in the
   browser as blank paper by default, with a **Photo texture** toggle to wrap the
   fold in the image and a **3-stage pipeline strip** (input photo → raw height
   field → symmetrized height field, tagged with the mask mirror-IoU) that
   replaces the old separate heatmap/reference panels; a **Symmetry** select
-  (Off / Auto / Force, default Auto — the mirror-IoU score shows in the status
+  (Off / Auto / Force, default Auto, the mirror-IoU score shows in the status
   bar) mirroring the CLI's `--symmetry`; a collapsible **showcase gallery** of
   baked sample results (cat, dog, elephant, butterfly, and a symmetrized
-  butterfly — each engine-labelled with a **Load** button); load your own
+  butterfly, each engine-labelled with a **Load** button); load your own
   `.fold` and fold it with an in-browser rigid-origami PBD solver (a loaded
   Miura folds at 0.17% strain with the crease signs recovered), download the
   current frame as OBJ, plus soft shadows and a ground plane.
@@ -577,18 +577,18 @@ roadmap called for next — all tested:
   analysis.
 - Self-intersection is now **detected** and can be softly penalised, and
   `fold_sequence` searches for a collision-free fold order (greedy or beam), but
-  neither guarantees a globally collision-free fold — the search is heuristic,
+  neither guarantees a globally collision-free fold; the search is heuristic,
   not exhaustive.
 - The origamizer has two engines. The default **corrugation** is a 1D
   approximation (exact for extruded profiles; independent pleated strips, with
   reported error, for full height fields). **`miura2d`** is a genuine 2D
-  warped-Miura fit whose folded mid-surface tracks the target roughly 8–200×
+  warped-Miura fit whose folded mid-surface tracks the target 8-200×
   more faithfully on curved subjects (see the table above; same metric on the
   single sheet each engine returns) and returns a real 2D crease pattern with
-  triangulated (planar) facets — but it is relief/tessellation origami, **not**
-  Origamizer arbitrary-3D tuck-folding, it is **not** flat-foldable (a curved
+  triangulated (planar) facets, but it is relief/tessellation origami, **not**
+  Origamizer arbitrary-3D tuck-folding; it is **not** flat-foldable (a curved
   relief can't collapse flat), and it trades a small, reported fold strain
-  (~0.2–0.5% mean; max usually below ~5%, higher at extreme aspect ratios) for
+  (~0.2-0.5% mean; max usually below ~5%, higher at extreme aspect ratios) for
   the fidelity gain rather than being an exact rigid fold. Both photo modes
   estimate shape rather than measure it: silhouette mode inflates a mask, and
   depth mode folds an *estimated* monocular relief, not ground-truth geometry.
