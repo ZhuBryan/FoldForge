@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "foldforge"
+version = "0.8.0"
+description = "A differentiable computational origami engine: geometry, a 3D fold simulator, differentiable kinematics, inverse design, a generative model, and metamaterials (M0-M6)."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Bryan Zhu" }]
+license = { text = "MIT" }
+
+# Pinned, minimal. M0 only needs array math + a renderer.
+# scipy/networkx/trimesh/torch get added when the simulator milestones need them.
+dependencies = [
+    "numpy==2.2.6",
+    "matplotlib==3.10.9",
+]
+
+[project.optional-dependencies]
+dev = ["pytest==8.3.4"]
+vision = ["opencv-python", "scipy"]   # image -> shape -> origami (segment + inflate)
+jax = ["jax"]                          # optional GPU autodiff backend
+depth = ["torch", "timm"]              # monocular depth estimation (origamize.depth)
+
+[project.scripts]
+foldforge = "foldforge.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["foldforge*"]
