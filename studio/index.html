@@ -53,7 +53,7 @@
  <div style="font-size:11px;color:#8b95a4;margin:3px 2px">Baked offline with the OpenCV pipeline; the butterfly is shown raw and bilaterally symmetrized for a before/after.</div></div>
 <div id="status"></div>
 <div id="ui">
- <select id="shape"></select>
+ <select id="shape" title="Pick a built-in shape or a baked sample to fold. Uploaded photos and opened .fold files also appear in this list."></select>
  <select id="detail" title="Fold detail for a dropped image: fewer/bigger folds vs. finer relief">
   <option value="10">Detail: Rough</option>
   <option value="16">Detail: Medium</option>
@@ -73,15 +73,18 @@
   <option value="auto" selected>Symmetry: Auto</option>
   <option value="force">Symmetry: Force</option>
  </select>
- <button id="heatBtn" class="on" title="Show/hide the photo pipeline strip (input &rarr; height field &rarr; symmetrized)">&#128200; Pipeline</button>
- <button id="galleryBtn" title="Open the showcase gallery of baked sample results">&#127912; Gallery</button>
- <button id="texBtn" title="Texture the folded sheet with the source photo. Off = blank paper (the reference photo stays in its own panel).">&#128444;&#65039; Photo texture</button>
- <button id="uploadBtn">&#128247; Fold an image</button>
+ <!-- actions -->
+ <button id="uploadBtn" title="Upload a photo (JPG or PNG) and fold it into a 3D relief. You can also drag an image anywhere onto the page.">&#128247; Upload photo</button>
  <input id="imgfile" type="file" accept="image/*" style="display:none">
- <button id="foldBtn">&#128193; Load .fold</button>
+ <button id="foldBtn" title="Open a FOLD crease-pattern file (.fold) and animate its fold.">&#128193; Open .fold</button>
  <input id="foldfile" type="file" accept=".fold,application/json" style="display:none">
- <button id="dl">&#11015; OBJ</button>
- <button id="play">&#10073;&#10073; Pause</button>
+ <button id="dl" title="Download the current folded frame as a Wavefront .obj mesh.">&#11015; Export OBJ</button>
+ <!-- panel / appearance toggles (green = on) -->
+ <button id="texBtn" title="Texture the folded sheet with the source photo, or show blank paper. The reference photo always stays in its own panel.">&#128444;&#65039; Texture: Paper</button>
+ <button id="heatBtn" class="on" title="Show or hide the photo pipeline strip (input &rarr; height field &rarr; symmetrized). Green = shown.">&#128200; Pipeline</button>
+ <button id="galleryBtn" title="Show or hide the showcase gallery of baked sample results. Green = shown.">&#127912; Gallery</button>
+ <!-- playback -->
+ <button id="play" title="Play or pause the folding animation.">&#10073;&#10073; Pause fold</button>
  <label class="fold">fold <input id="slider" type="range" min="0" max="1" step="0.001" value="0"></label>
  <span id="pct">0%</span>
 </div>
@@ -193,6 +196,7 @@ function buildShape(name){
   const canTex=!!(S&&S.tex&&S.uv);
   texBtn.disabled=!canTex;
   texBtn.classList.toggle('on', canTex&&photoTex);
+  syncTexBtn();
 }
 // smoothstep activation for crease k of K under global fraction t (step-by-step folding)
 function stepFrac(k,K,t){ if(K<=1)return t; const w=1/K,u=(t-k*w)/w,c=Math.min(1,Math.max(0,u)); return c*c*(3-2*c); }
@@ -591,7 +595,7 @@ el.addEventListener('pointerdown',e=>{down=true;px=e.clientX;py=e.clientY});
 addEventListener('pointerup',()=>down=false);
 addEventListener('pointermove',e=>{if(!down)return;rz+=(e.clientX-px)*0.01;rx+=(e.clientY-py)*0.01;px=e.clientX;py=e.clientY;});
 addEventListener('wheel',e=>{camera.position.multiplyScalar(1+Math.sign(e.deltaY)*0.08);},{passive:true});
-let playing=true,t=0,dir=1,stepMode=false,lastImg=null,detailNx=24,shapeMode='subject',heatOn=true,photoTex=false,symMode='auto';
+let playing=true,t=0,dir=1,stepMode=false,lastImg=null,lastImgUrl=null,detailNx=24,shapeMode='subject',heatOn=true,photoTex=false,symMode='auto';
 const slider=document.getElementById('slider'),pct=document.getElementById('pct'),play=document.getElementById('play'),sel=document.getElementById('shape');
 const detail=document.getElementById('detail'),foldmode=document.getElementById('foldmode');
 foldmode.addEventListener('change',()=>{stepMode=(foldmode.value==='step');});
@@ -611,7 +615,8 @@ galleryBtn.addEventListener('click',()=>{const open=galleryPanel.style.display!=
 heatBtn.addEventListener('click',()=>{heatOn=!heatOn; heatBtn.classList.toggle('on',heatOn); drawPipeline(S);});
 // Photo-texture toggle: swap the current sheet between blank paper and the photo,
 // no rebuild needed (UVs are already on the geometry).
-texBtn.addEventListener('click',()=>{photoTex=!photoTex; texBtn.classList.toggle('on',photoTex);
+function syncTexBtn(){ texBtn.innerHTML='&#128444;&#65039; Texture: '+(photoTex?'Photo':'Paper'); }
+texBtn.addEventListener('click',()=>{photoTex=!photoTex; texBtn.classList.toggle('on',photoTex); syncTexBtn();
   if(mesh){ const m=mesh.material; mesh.material=materialFor(S); if(m)m.dispose(); }});
 function _heatColor(v){v=Math.min(1,Math.max(0,v));
   const S=[[0,0,127],[0,0,255],[0,255,255],[0,255,0],[255,255,0],[255,0,0],[127,0,0]];
@@ -679,7 +684,7 @@ function rebuildImage(){ if(!lastImg)return;
   DATA.shapes['__up']=shape;
   if(!DATA.order.includes('__up')){DATA.order.push('__up'); const o=document.createElement('option');o.value='__up';o.textContent=shape.label;sel.appendChild(o);}
   else{const ex=[...sel.options].find(o=>o.value==='__up'); if(ex)ex.textContent=shape.label;}
-  sel.value='__up'; buildShape('__up'); t=0;dir=1;playing=true;play.innerHTML='&#10073;&#10073; Pause';
+  sel.value='__up'; buildShape('__up'); t=0;dir=1;playing=true;play.innerHTML='&#10073;&#10073; Pause fold';
   const nm=lastImg._name||'image', iw=lastImg.naturalWidth||lastImg.width, ih=lastImg.naturalHeight||lastImg.height;
   const info=(shapeMode==='subject')?('subject '+Math.round(rawSeg.frac*100)+'% of frame'):'brightness relief';
   let smsg='';
@@ -689,7 +694,7 @@ function rebuildImage(){ if(!lastImg)return;
 DATA.order.forEach(n=>{const o=document.createElement('option');o.value=n;o.textContent=DATA.shapes[n].label||n;sel.appendChild(o);});
 // showcase gallery: one card per baked sample (marked by an `engine` label),
 // each with a downscaled thumbnail + a Load button that builds the baked model
-function loadBaked(n){ sel.value=n; buildShape(n); t=0;dir=1;playing=true;play.innerHTML='&#10073;&#10073; Pause'; }
+function loadBaked(n){ sel.value=n; buildShape(n); t=0;dir=1;playing=true;play.innerHTML='&#10073;&#10073; Pause fold'; }
 function buildGallery(){
   const list=document.getElementById('gallerylist');
   DATA.order.forEach(n=>{const Sn=DATA.shapes[n]; if(!Sn||!Sn.engine)return;
@@ -705,20 +710,25 @@ function buildGallery(){
   });
 }
 buildGallery();
-sel.addEventListener('change',()=>{buildShape(sel.value);t=0;dir=1;playing=true;play.innerHTML='&#10073;&#10073; Pause';});
-slider.addEventListener('input',()=>{playing=false;play.innerHTML='&#9654; Play';t=parseFloat(slider.value);});
-play.addEventListener('click',()=>{playing=!playing;play.innerHTML=playing?'&#10073;&#10073; Pause':'&#9654; Play';});
+sel.addEventListener('change',()=>{buildShape(sel.value);t=0;dir=1;playing=true;play.innerHTML='&#10073;&#10073; Pause fold';});
+slider.addEventListener('input',()=>{playing=false;play.innerHTML='&#9654; Play fold';t=parseFloat(slider.value);});
+play.addEventListener('click',()=>{playing=!playing;play.innerHTML=playing?'&#10073;&#10073; Pause fold':'&#9654; Play fold';});
 const statusEl=document.getElementById('status');
 function setStatus(msg,kind){ if(!msg){statusEl.style.display='none';return;} statusEl.textContent=msg; statusEl.className=kind||''; statusEl.style.display='block'; }
 // load an image File -> fold it; a visible status message on both success and failure (undecodable formats no longer fail silently)
 function foldImageFile(file){
   if(!file)return; setStatus('Reading '+file.name+' \u2026');
-  const url=URL.createObjectURL(file), img=new Image();
-  img.onload=()=>{ URL.revokeObjectURL(url);
+  // Keep the object URL alive: the pipeline strip's "input photo" panel loads
+  // the same URL into its own <img>, so revoking it on load (as we used to) left
+  // that panel with a dead blob URL and a broken/empty box. Free the *previous*
+  // upload's URL instead, so at most one is ever held.
+  if(lastImgUrl) URL.revokeObjectURL(lastImgUrl);
+  const url=URL.createObjectURL(file), img=new Image(); lastImgUrl=url;
+  img.onload=()=>{
     try{ lastImg=img; img._name=file.name; rebuildImage(); }
     catch(err){ setStatus('Could not fold '+file.name+': '+err.message,'err'); }
   };
-  img.onerror=()=>{ URL.revokeObjectURL(url);
+  img.onerror=()=>{ if(lastImgUrl===url){URL.revokeObjectURL(url); lastImgUrl=null;}
     setStatus("Couldn't read "+file.name+" \u2014 browsers can't decode this format (iPhone HEIC/HEIF and TIFF aren't supported). Re-export it as JPG or PNG.",'err'); };
   img.src=url;
 }
@@ -732,7 +742,7 @@ function foldFoldFile(file){
     DATA.shapes['__fold']=shape;
     if(!DATA.order.includes('__fold')){DATA.order.push('__fold'); const o=document.createElement('option');o.value='__fold';o.textContent=shape.label;sel.appendChild(o);}
     else{const ex=[...sel.options].find(o=>o.value==='__fold'); if(ex)ex.textContent=shape.label;}
-    sel.value='__fold'; buildShape('__fold'); t=0;dir=1;playing=false;play.innerHTML='&#9654; Play'; slider.value=0;
+    sel.value='__fold'; buildShape('__fold'); t=0;dir=1;playing=false;play.innerHTML='&#9654; Play fold'; slider.value=0;
     setStatus('Loaded '+file.name,'ok');
   }catch(err){ setStatus('Could not parse '+file.name+': '+err.message,'err'); } };
   rd.onerror=()=>setStatus("Couldn't read "+file.name,'err');

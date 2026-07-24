@@ -16,6 +16,13 @@ const fs = require('fs');
   const img = process.argv[2] || (fs.existsSync(sample) ? sample : path.join(__dirname, '..', 'zebra.jpg'));
   const html = 'file://' + path.join(__dirname, '..', 'studio', 'index.html');
   const shot = path.join(__dirname, 'output', 'studio_pipeline_ui.png');
+  const shotUpload = path.join(__dirname, 'output', 'studio_fix_upload.png');
+  const shotGallery = path.join(__dirname, 'output', 'studio_fix_gallery.png');
+  // panel-1 ("input photo") image source, as the browser resolves it
+  const panelSrc = async () => page.evaluate(() => {
+    const im = document.getElementById('pimg');
+    return im && !document.getElementById('pstage-input').classList.contains('hidden') ? im.currentSrc || im.src || '' : '';
+  });
   const browser = await puppeteer.launch({
     executablePath: process.env.CHROME || '/usr/bin/google-chrome',
     args: ['--no-sandbox', '--disable-gpu', '--allow-file-access-from-files']});
@@ -54,6 +61,11 @@ const fs = require('fs');
   if (pipe.strip === 'none') await fail('pipeline strip not shown');
   if (!pipe.input || !pipe.height) await fail('pipeline strip stages missing (input/height)');
 
+  // ---- panel 1 ("input photo") actually shows the uploaded photo ----
+  const uploadSrc = await panelSrc();
+  if (!uploadSrc) await fail('panel 1 input-photo src empty after upload');
+  await page.screenshot({path: shotUpload});
+
   // ---- rough-detail rebuild still works ----
   await page.select('#detail', '10');
   await new Promise(r => setTimeout(r, 1800));
@@ -74,6 +86,11 @@ const fs = require('fs');
   if (!gsym) await fail('baked butterfly_sym / gallery load unavailable');
   await new Promise(r => setTimeout(r, 1500));
 
+  // ---- panel 1 reuses the baked sample's thumbnail data-URI ----
+  const gallerySrc = await panelSrc();
+  if (!gallerySrc) await fail('panel 1 input-photo src empty after loading baked gallery sample');
+  await page.screenshot({path: shotGallery});
+
   // ---- step-fold the loaded sample, then screenshot the new UI ----
   await page.select('#foldmode', 'step');
   await page.evaluate(() => { const s = document.getElementById('slider'); s.value = 1; s.dispatchEvent(new Event('input')); });
@@ -84,6 +101,8 @@ const fs = require('fs');
   console.log('OK — studio folds', path.basename(img),
     '| live mirror-IoU', mirror, applied ? '(symmetrized)' : '(left as-is)',
     '| baked butterfly_sym IoU', gsym.iou, '| gallery cards', cards,
-    '| pipeline sym-stage', pipe.sym, '| screenshot', shot, '|', await status());
+    '| pipeline sym-stage', pipe.sym,
+    '| panel1 upload src', uploadSrc.slice(0, 24) + '…', '| panel1 gallery src', gallerySrc.slice(0, 24) + '…',
+    '| screenshots', shot, shotUpload, shotGallery, '|', await status());
   await browser.close();
 })().catch(e => { console.error('FAIL:', e.message); process.exit(1); });
