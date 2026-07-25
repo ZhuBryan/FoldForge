@@ -400,15 +400,17 @@ foldforge export zebra.fold zebra.svg             # layered SVG/DXF for a cutter
 - **Web studio (M6):** open `studio/index.html` in any browser, drag to rotate,
   scrub the fold slider, watch the built-in shapes fold, or **drag a photo / `.fold`
   file onto the window** to fold your own.
-- **Sample gallery:** `python examples/make_samples.py` folds four sample
-  animals (cat, dog, elephant, blue morpho butterfly) from `examples/samples/`
+- **Sample gallery:** `python examples/make_samples.py` folds the flat,
+  clean-silhouette sample subjects from `examples/samples/`
   into closed printable solids and renders `examples/output/animals_showcase.png`
-  (photo → segmented height-field heatmap → folded solid, one row per animal).
+  (photo → segmented height-field heatmap → folded solid, one row per subject).
   Sample photos are scaled from Wikimedia Commons files (see each file page for
-  its license): [Cat03.jpg](https://commons.wikimedia.org/wiki/File:Cat03.jpg),
-  [Labrador Retriever portrait.jpg](https://commons.wikimedia.org/wiki/File:Labrador_Retriever_portrait.jpg),
-  [African Bush Elephant.jpg](https://commons.wikimedia.org/wiki/File:African_Bush_Elephant.jpg),
-  [Morpho didius Male Dos MHNT.jpg](https://commons.wikimedia.org/wiki/File:Morpho_didius_Male_Dos_MHNT.jpg).
+  its license): [Morpho didius Male Dos MHNT.jpg](https://commons.wikimedia.org/wiki/File:Morpho_didius_Male_Dos_MHNT.jpg) (blue morpho butterfly, CC BY-SA 4.0),
+  [Papilio thoas thoas MHNT dos.jpg](https://commons.wikimedia.org/wiki/File:Papilio_thoas_thoas_MHNT_dos.jpg) (swallowtail butterfly, CC BY-SA 4.0),
+  [Saturnia pyri MHNT dos.jpg](https://commons.wikimedia.org/wiki/File:Saturnia_pyri_MHNT_dos.jpg) (giant peacock moth, CC BY-SA 4.0),
+  [Autumn Ginkgo Leaf.jpg](https://commons.wikimedia.org/wiki/File:Autumn_Ginkgo_Leaf.jpg) (ginkgo leaf, CC BY-SA 3.0),
+  [White starfish on beige background.jpg](https://commons.wikimedia.org/wiki/File:White_starfish_on_beige_background.jpg) (starfish, CC0),
+  [Carassius wild golden fish 2013 G1 (white background).jpg](https://commons.wikimedia.org/wiki/File:Carassius_wild_golden_fish_2013_G1_(white_background).jpg) (goldfish / Prussian carp, public domain).
 - **Tests:** `pytest -q` runs 149 tests across all milestones (plus one that skips
   when JAX isn't installed): the two theorems, FOLD round-tripping, the
   dihedral-gradient and kinematics finite-difference checks, the implicit
@@ -560,8 +562,9 @@ roadmap called for next, all tested:
   replaces the old separate heatmap/reference panels; a **Symmetry** select
   (Off / Auto / Force, default Auto, the mirror-IoU score shows in the status
   bar) mirroring the CLI's `--symmetry`; a collapsible **showcase gallery** of
-  baked sample results (cat, dog, elephant, butterfly, and a symmetrized
-  butterfly, each engine-labelled with a **Load** button); load your own
+  baked sample results (blue morpho butterfly and its symmetrized version,
+  swallowtail, giant peacock moth, ginkgo leaf, starfish, and goldfish, each
+  engine-labelled with a **Load** button); load your own
   `.fold` and fold it with an in-browser rigid-origami PBD solver (a loaded
   Miura folds at 0.17% strain with the crease signs recovered), download the
   current frame as OBJ, plus soft shadows and a ground plane.

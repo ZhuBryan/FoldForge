@@ -26,10 +26,12 @@ OUT = os.path.join(HERE, "output")
 
 # rect (original-pixel coords) only where the busy background defeats auto-rect
 ANIMALS = [
-    ("cat", None),
-    ("dog", None),
-    ("elephant", (230, 800, 1470, 1500)),
     ("butterfly", None),
+    ("swallowtail", None),
+    ("moth", None),
+    ("ginkgo", None),
+    ("starfish", (120, 25, 835, 700)),
+    ("fish", None),
 ]
 
 HEAT = LinearSegmentedColormap.from_list(

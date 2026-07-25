@@ -18,6 +18,9 @@ const fs = require('fs');
   const shot = path.join(__dirname, 'output', 'studio_pipeline_ui.png');
   const shotUpload = path.join(__dirname, 'output', 'studio_fix_upload.png');
   const shotGallery = path.join(__dirname, 'output', 'studio_fix_gallery.png');
+  const shotRectFlat = path.join(__dirname, 'output', 'studio_rect_flat.png');
+  const shotRectFolded = path.join(__dirname, 'output', 'studio_rect_folded.png');
+  const setFold = f => page.evaluate(v => { const s = document.getElementById('slider'); s.value = v; s.dispatchEvent(new Event('input')); }, f);
   // panel-1 ("input photo") image source, as the browser resolves it
   const panelSrc = async () => page.evaluate(() => {
     const im = document.getElementById('pimg');
@@ -91,6 +94,33 @@ const fs = require('fs');
   if (!gallerySrc) await fail('panel 1 input-photo src empty after loading baked gallery sample');
   await page.screenshot({path: shotGallery});
 
+  // ---- flat-sheet footprint: a baked subject must start as a clean RECTANGLE at
+  //      fold=0 (relief rises within it), not a silhouette-shaped blob ----
+  await page.evaluate(() => { if (typeof loadBaked === 'function') loadBaked('butterfly'); });
+  await new Promise(r => setTimeout(r, 800));
+  await page.select('#foldmode', 'all');
+  await setFold(0);
+  await new Promise(r => setTimeout(r, 600));
+  const rect = await page.evaluate(() => {
+    const p = geo.attributes.position.array, nx = S.nx, ny = S.ny;
+    let X0 = 1e9, X1 = -1e9, W = 0;
+    for (let k = 0; k < p.length; k += 3) { if (p[k] < X0) X0 = p[k]; if (p[k] > X1) X1 = p[k]; }
+    W = X1 - X0 || 1;
+    // rectangle => every grid row spans the same x-range; a ragged developed sheet does not
+    let mnMax = 1e9, mxMax = -1e9, mnMin = 1e9, mxMin = -1e9;
+    for (let j = 0; j < ny; j++) { let a = 1e9, b = -1e9;
+      for (let i = 0; i < nx; i++) { const x = p[(j * nx + i) * 3]; if (x < a) a = x; if (x > b) b = x; }
+      if (b < mnMax) mnMax = b; if (b > mxMax) mxMax = b; if (a < mnMin) mnMin = a; if (a > mxMin) mxMin = a; }
+    return { nx, ny, rightRag: (mxMax - mnMax) / W, leftRag: (mxMin - mnMin) / W };
+  });
+  if (!rect || !(rect.nx > 1)) await fail('could not read flat-sheet geometry');
+  if (rect.rightRag > 0.06 || rect.leftRag > 0.06)
+    await fail('flat sheet is not rectangular (ragged edges): ' + JSON.stringify(rect));
+  await page.screenshot({path: shotRectFlat});
+  await setFold(1);
+  await new Promise(r => setTimeout(r, 900));
+  await page.screenshot({path: shotRectFolded});
+
   // ---- step-fold the loaded sample, then screenshot the new UI ----
   await page.select('#foldmode', 'step');
   await page.evaluate(() => { const s = document.getElementById('slider'); s.value = 1; s.dispatchEvent(new Event('input')); });
@@ -103,6 +133,7 @@ const fs = require('fs');
     '| baked butterfly_sym IoU', gsym.iou, '| gallery cards', cards,
     '| pipeline sym-stage', pipe.sym,
     '| panel1 upload src', uploadSrc.slice(0, 24) + '…', '| panel1 gallery src', gallerySrc.slice(0, 24) + '…',
-    '| screenshots', shot, shotUpload, shotGallery, '|', await status());
+    '| flat-sheet rag L/R', rect.leftRag.toFixed(3) + '/' + rect.rightRag.toFixed(3), '(rectangle OK)',
+    '| screenshots', shot, shotUpload, shotGallery, shotRectFlat, shotRectFolded, '|', await status());
   await browser.close();
 })().catch(e => { console.error('FAIL:', e.message); process.exit(1); });
