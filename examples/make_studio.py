@@ -59,7 +59,7 @@ def two_peaks_field(nx=20, ny=16, height=6.0):
     return height * Z / (Z.max() + 1e-9)
 
 
-def build_heightfield_shape(Z, label, length=24.0, width=20.0, subject=False):
+def build_heightfield_shape(Z, label, length=24.0, width=20.0):
     """Origamize a height field row-by-row and record the fold sweep.
 
     Mirrors the in-browser image origamizer: each row becomes an exact fold
@@ -95,21 +95,13 @@ def build_heightfield_shape(Z, label, length=24.0, width=20.0, subject=False):
     frames = []
     for fi in range(NF):
         V = []
-        if subject:
-            # subject relief rises out of a flat rectangle: keep the fully-folded
-            # (rectangular) footprint and scale only the height, so fold=0 is a clean
-            # flat sheet instead of the ragged developed pattern.
-            f = fi / (NF - 1)
-            for p in final:
-                V.append([p[0] - c[0], p[1] - c[1], f * p[2] - c[2]])
-        else:
-            f = F0 + (1 - F0) * fi / (NF - 1)
-            for j in range(ny):
-                ang, seg, start = rows[j]
-                sp = fold_chain(f * ang, seg=seg).spine
-                sp = sp + (start - sp[0])               # keep every frame anchored to the row's z
-                for i in range(nx):
-                    V.append([sp[i, 0] - c[0], ys[j] - c[1], sp[i, 1] - c[2]])
+        f = F0 + (1 - F0) * fi / (NF - 1)
+        for j in range(ny):
+            ang, seg, start = rows[j]
+            sp = fold_chain(f * ang, seg=seg).spine
+            sp = sp + (start - sp[0])               # keep every frame anchored to the row's z
+            for i in range(nx):
+                V.append([sp[i, 0] - c[0], ys[j] - c[1], sp[i, 1] - c[2]])
         frames.append(V)
 
     tris = []
@@ -131,7 +123,7 @@ def build_heightfield_shape(Z, label, length=24.0, width=20.0, subject=False):
              "rows": [{"a": a.tolist(), "s": float(sg), "sx": float(st[0]), "sz": float(st[1])}
                       for (a, sg, st) in rows],
              "ys": [float(v) for v in ys], "nx": int(nx), "ny": int(ny),
-             "c": [float(v) for v in c], "flat": bool(subject)}
+             "c": [float(v) for v in c]}
     return dict(frames=frames, triangles=tris, creases=[], target=segl, label=label,
                 chain=chain)
 
@@ -355,7 +347,7 @@ def _bake_one_animal(name, label, rect, sym_mode="off", stem=None,
     Zg -= Zg.min()
     Zg /= (Zg.max() + 1e-9)
     hscale = 0.38 * min(L, Wd)                      # relief scaled to the sheet (no tube-curl)
-    shp = build_heightfield_shape(Zg * hscale, label, length=L, width=Wd, subject=True)
+    shp = build_heightfield_shape(Zg * hscale, label, length=L, width=Wd)
 
     # the fold chain drives the animation, so keep only flat + fully folded frames
     shp["frames"] = [shp["frames"][0], shp["frames"][-1]]
@@ -643,12 +635,6 @@ function computeChain(t,step){
     let p=0; for(let i=0;i<np1;i++)for(let r=0;r<nrows;r++){pos[p++]=spx[i]-cx; pos[p++]=ys[r]-cy; pos[p++]=spz[i]-cz;}
   } else {
     const rows=ch.rows,ys=ch.ys,nx=ch.nx,ny=ch.ny,K=nx-1,cx=ch.c[0],cy=ch.c[1],cz=ch.c[2]; let p=0;
-    if(ch.flat){   // subject relief rises out of a flat rectangle: keep the fully-folded footprint, scale only the height by t
-      for(let j=0;j<ny;j++){const r=rows[j],ang=r.a,seg=r.s; let h=0,x=r.sx,z=r.sz;
-        pos[p++]=x-cx; pos[p++]=ys[j]-cy; pos[p++]=t*z-cz;
-        for(let k=0;k<ang.length;k++){h+=ang[k]; x+=seg*Math.cos(h); z+=seg*Math.sin(h);
-          pos[p++]=x-cx; pos[p++]=ys[j]-cy; pos[p++]=t*z-cz;}}
-    } else
     for(let j=0;j<ny;j++){const r=rows[j],ang=r.a,seg=r.s; let h=0,x=r.sx,z=t*r.sz;  // scale the row-anchor by t so fold=0 is a flat sheet, fold=1 unchanged
       pos[p++]=x-cx; pos[p++]=ys[j]-cy; pos[p++]=z-cz;
       for(let k=0;k<ang.length;k++){const f=step?stepFrac(k,K,t):t; h+=f*ang[k]; x+=seg*Math.cos(h); z+=seg*Math.sin(h);
@@ -906,11 +892,8 @@ function buildImageShape(img,nx,ny,mode,seg){
   const F1=[]; for(let j=0;j<ny;j++){const sp=foldChain(rows[j].angles,rows[j].seg,1); for(let i=0;i<nx;i++) F1.push([sp[i][0],ys[j],sp[i][1]]);}
   let cx=0,cy=0,cz=0; F1.forEach(p=>{cx+=p[0];cy+=p[1];cz+=p[2];}); cx/=F1.length;cy/=F1.length;cz/=F1.length;
   const frames=[];
-  for(let fi=0;fi<NF;fi++){const V=[];
-    if(subj){const f=fi/(NF-1);   // subject relief rises out of a flat rectangle (keep the folded footprint, scale only height)
-      for(let k=0;k<F1.length;k++) V.push([F1[k][0]-cx,F1[k][1]-cy,f*F1[k][2]-cz]);}
-    else{const f=0.04+(1-0.04)*fi/(NF-1);
-      for(let j=0;j<ny;j++){const sp=foldChain(rows[j].angles,rows[j].seg,f); for(let i=0;i<nx;i++) V.push([sp[i][0]-cx,ys[j]-cy,sp[i][1]-cz]);}}
+  for(let fi=0;fi<NF;fi++){const V=[]; const f=0.04+(1-0.04)*fi/(NF-1);
+    for(let j=0;j<ny;j++){const sp=foldChain(rows[j].angles,rows[j].seg,f); for(let i=0;i<nx;i++) V.push([sp[i][0]-cx,ys[j]-cy,sp[i][1]-cz]);}
     frames.push(V);}
   const idx=(j,i)=>j*nx+i; const tris=[];
   for(let j=0;j<ny-1;j++)for(let i=0;i<nx-1;i++) tris.push([idx(j,i),idx(j,i+1),idx(j+1,i+1)],[idx(j,i),idx(j+1,i+1),idx(j+1,i)]);
@@ -924,7 +907,7 @@ function buildImageShape(img,nx,ny,mode,seg){
       uv.push((bx0+(i/(nx-1))*(bx1-bx0))/(seg.w-1),1-(by0+(j/(ny-1))*(by1-by0))/(seg.h-1));}}
   else for(let j=0;j<ny;j++)for(let i=0;i<nx;i++){uv.push(i/(nx-1),1-j/(ny-1));}
   const tex=new THREE.Texture(img); tex.needsUpdate=true; tex.colorSpace=THREE.SRGBColorSpace;
-  const chain={kind:'rows',rows:rows.map(r=>({a:r.angles,s:r.seg,sx:0,sz:0})),ys:ys,nx:nx,ny:ny,c:[cx,cy,cz],flat:subj};
+  const chain={kind:'rows',rows:rows.map(r=>({a:r.angles,s:r.seg,sx:0,sz:0})),ys:ys,nx:nx,ny:ny,c:[cx,cy,cz]};
   return {frames:frames,triangles:tris,creases:[],target:segl,uv:uv,tex:tex,chain:chain,nx:nx,ny:ny,seg:seg||null,mode:mode,label:subj?'Your image (3D subject)':'Your image (brightness relief)'};
 }
 // ===== embedded PBD rigid-origami solver (folds loaded .fold patterns live) =====
