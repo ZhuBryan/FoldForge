@@ -363,12 +363,20 @@ def origamize_silhouette(source, grid=(30, 30), height: float = 6.0,
                          detail: float = 0.35, rect=None, closed: bool = False,
                          close_mode: str = "mirror", close_base: float = 0.0,
                          folds=None, style: str = "smooth", levels: int = 5,
-                         engine: str = "corrugation", symmetry: str = "off"):
+                         engine: str = "corrugation", symmetry: str = "off",
+                         foldable=None, rect_sheet: bool = False):
     """Estimate the subject's shape from an image and fold it.
 
     Returns ``(result, relief)``: an
     :class:`~foldforge.origamize.surface.OrigamiResult` and the estimated height
     field (handy for visualisation). ``detail`` blends in interior shading.
+
+    ``foldable`` is the hand-fold budget preset (``"easy"``/``"medium"``/
+    ``"hard"``); when given it sets ``folds`` to a small target so the crease
+    pattern is genuinely foldable by hand (tens of creases, not hundreds).
+    ``"hard"`` keeps the current detail. The result carries ``crease_count`` and
+    ``difficulty``. This is still a coarse relief/corrugation, not figurative
+    origami.
 
     ``folds`` is the fold-count knob (cells across the subject's longer side);
     it drives the grid resolution *and* makes the folded sheet keep the subject
@@ -387,6 +395,8 @@ def origamize_silhouette(source, grid=(30, 30), height: float = 6.0,
     flat plate). ``close_mode`` is ``"mirror"`` (puffed symmetric back) or
     ``"flat"`` (back flattened to ``z=close_base``).
     """
+    from foldforge.origamize.surface import budget_folds
+    folds = budget_folds(foldable, folds)
     size = max(float(length), float(width))
     Z, gmask, L, W = relief_from_image(
         source, grid=grid, power=power, smooth=smooth, detail=detail, rect=rect,
@@ -399,10 +409,13 @@ def origamize_silhouette(source, grid=(30, 30), height: float = 6.0,
     if closed:
         # Trim the flat background before mirroring so the solid hugs the subject
         # (a thin rim at the silhouette) instead of a wide flat plate. Fall back
-        # to the full sheet if the mask is empty or covers everything.
+        # to the full sheet if the mask is empty or covers everything. With
+        # ``rect_sheet=True`` the trim is skipped entirely, so the exported solid
+        # keeps the FULL rectangular sheet - flat background paper at the baseline
+        # with the subject relief rising within it, like a real folded sheet.
         keep = gmask.reshape(-1).astype(bool)
         tris = result.triangles
-        if keep.any() and not keep.all():
+        if not rect_sheet and keep.any() and not keep.all():
             tris = trim_background_triangles(result.triangles, keep)
         pruned = OrigamiResult(result.pattern, result.folded, result.angles,
                                result.target, result.error, triangles=tris)

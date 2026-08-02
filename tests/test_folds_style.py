@@ -85,3 +85,58 @@ def test_origami_and_folds_close_into_solid():
     assert r.solid is not None
     V, T = r.solid
     assert len(T) > len(r.triangles)     # closed solid is thicker than open sheet
+
+
+# --- hand-fold budget: crease count + difficulty ----------------------------
+
+def test_crease_stats_merges_collinear_pleats():
+    """A corrugation's extruded pleats each span many panel edges but count as
+    one fold line; crease_stats reports the fold-line count, not the edge count."""
+    from foldforge.origamize import origamize_heightfield, heightfield_dome, crease_stats
+    r = origamize_heightfield(heightfield_dome(12, 8))
+    count, diff = crease_stats(r.pattern)
+    mv_edges = sum(1 for a in r.pattern.assignment if a in ("M", "V"))
+    assert count < mv_edges              # collinear edges merged into fold lines
+    assert count == r.crease_count       # result exposes the same number
+    assert diff == r.difficulty in ("Easy", "Medium", "Hard (machine)")
+
+
+def test_budget_folds_presets_and_labels():
+    from foldforge.origamize import budget_folds, difficulty_label
+    assert budget_folds("easy") < budget_folds("medium")
+    assert budget_folds("hard", default=40) == 40        # hard keeps current detail
+    assert budget_folds(None, default=33) == 33          # back-compat: no budget
+    assert difficulty_label(12) == "Easy"
+    assert difficulty_label(300) == "Hard (machine)"
+
+
+def test_easy_budget_far_fewer_creases_than_detailed():
+    """The hand-fold budget genuinely coarsens: Easy yields far fewer creases
+    than the detailed default, and every result reports crease_count/difficulty."""
+    from foldforge.origamize import origamize_silhouette
+    img = _portrait_subject()
+    easy, _ = origamize_silhouette(img, foldable="easy")
+    hard, _ = origamize_silhouette(img, foldable="hard")
+    assert easy.crease_count < hard.crease_count
+    assert len(easy.triangles) < len(hard.triangles)
+    assert easy.difficulty == "Easy"
+    for r in (easy, hard):
+        assert isinstance(r.crease_count, int) and r.crease_count >= 0
+        assert r.difficulty in ("Easy", "Medium", "Hard (machine)")
+
+
+def test_svg_outline_only_is_clean_hand_fold_sheet():
+    """outline_only replaces the internal panel-edge clutter with one sheet
+    rectangle, keeping the coloured M/V creases: a printable hand-fold sheet."""
+    import tempfile, os
+    from foldforge.origamize import origamize_heightfield, heightfield_dome
+    from foldforge.fabricate import to_svg
+    r = origamize_heightfield(heightfield_dome(14, 8))
+    with tempfile.TemporaryDirectory() as d:
+        full = os.path.join(d, "full.svg"); clean = os.path.join(d, "clean.svg")
+        to_svg(r.pattern, full)
+        to_svg(r.pattern, clean, outline_only=True)
+        tf, tc = open(full).read(), open(clean).read()
+    assert tc.count("<line") < tf.count("<line")     # panel clutter removed
+    assert tc.count("<rect") == 1                     # one sheet outline
+    assert "#ff0000" in tc or "#0000ff" in tc         # M/V creases still present

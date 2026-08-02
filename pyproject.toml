@@ -22,7 +22,7 @@ dependencies = [
 dev = ["pytest==8.3.4"]
 vision = ["opencv-python", "scipy"]   # image -> shape -> origami (segment + inflate)
 jax = ["jax"]                          # optional GPU autodiff backend
-depth = ["torch", "timm"]              # monocular depth estimation (origamize.depth)
+depth = ["torch", "timm", "transformers"]  # monocular depth (MiDaS/DPT + Depth Anything V2)
 
 [project.scripts]
 foldforge = "foldforge.cli:main"

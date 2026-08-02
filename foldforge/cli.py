@@ -57,17 +57,20 @@ def _origamize(args) -> None:
         from foldforge.origamize import origamize_depth
         result, _ = origamize_depth(args.image, grid=(args.rows, args.cols),
                                     model_type=args.depth_model, engine=args.engine,
-                                    symmetry=args.symmetry)
+                                    symmetry=args.symmetry, foldable=args.foldable)
     elif args.silhouette:
         from foldforge.origamize import origamize_silhouette
         result, _ = origamize_silhouette(args.image, grid=(args.rows, args.cols),
-                                         engine=args.engine, symmetry=args.symmetry)
+                                         engine=args.engine, symmetry=args.symmetry,
+                                         foldable=args.foldable)
     else:
         from foldforge.origamize import origamize_image
         result = origamize_image(args.image, grid=(args.rows, args.cols),
-                                 invert=args.invert, engine=args.engine)
+                                 invert=args.invert, engine=args.engine,
+                                 foldable=args.foldable)
     write_fold(result.pattern, args.out)
     print(f"wrote {args.out}  (match error {result.error:.3f})")
+    print(f"  crease pattern : {result.crease_count} folds, {result.difficulty}")
     if args.engine == "miura2d" and hasattr(result, "max_strain"):
         print(f"  fold strain: mean {result.mean_strain * 100:.1f}%  "
               f"max {result.max_strain * 100:.1f}%")
@@ -89,6 +92,7 @@ def _fold(args) -> None:
     if ext not in (".stl", ".glb", ".gltf", ".obj"):
         raise SystemExit(
             f"unsupported output '{args.out}': use a .stl, .glb, or .obj extension")
+    from foldforge.origamize import budget_folds
     closed = not args.open_sheet
     detail_map = {"rough": 12, "medium": 24, "fine": 40}
     folds = args.folds
@@ -96,20 +100,24 @@ def _fold(args) -> None:
         folds = detail_map[args.detail]
     if folds is None:                    # back-compat: --grid still sets resolution
         folds = args.grid
+    if args.foldable:                    # hand-fold budget overrides all of the above
+        folds = budget_folds(args.foldable, folds)
     style = args.style
     try:
         if args.depth:
             from foldforge.origamize import origamize_depth
             result, relief = origamize_depth(args.image, folds=folds, style=style,
                                              closed=closed, model_type=args.depth_model,
-                                             engine=args.engine, symmetry=args.symmetry)
+                                             engine=args.engine, symmetry=args.symmetry,
+                                             rect_sheet=args.rect_sheet)
             how = f"depth ({args.depth_model})"
         else:
             from foldforge.origamize import origamize_silhouette
             result, relief = origamize_silhouette(args.image, folds=folds,
                                                   style=style, closed=closed,
                                                   engine=args.engine,
-                                                  symmetry=args.symmetry)
+                                                  symmetry=args.symmetry,
+                                                  rect_sheet=args.rect_sheet)
             how = "silhouette"
     except FileNotFoundError as exc:
         raise SystemExit(f"error: {exc}")
@@ -143,14 +151,71 @@ def _fold(args) -> None:
         print(f"  fold strain      : mean {result.mean_strain * 100:.1f}%  "
               f"max {result.max_strain * 100:.1f}%  "
               f"(relief pattern, not flat-foldable)")
+    print(f"  crease pattern   : {result.crease_count} folds, {result.difficulty} "
+          f"(hand-fold difficulty)")
     print(f"  {kind}: {len(faces)} triangles, {size_kb:.0f} KB")
+
+
+def _design(args) -> None:
+    """Design a figurative uniaxial base from a built-in stick-figure tree.
+
+    Circle-packs the tree's flaps (TreeMaker-lite), fills the Delaunay
+    triangulation with rabbit-ear molecules, and writes the crease pattern as a
+    layered SVG (M/V colours) plus a matching .fold next to it.
+    """
+    from foldforge.design import get_tree, design_base, flap_length_errors
+    from foldforge.geometry.foldability import foldability_report
+    from foldforge.fabricate import to_svg
+
+    tree = get_tree(args.tree)
+    packing, pattern = design_base(tree)
+    if args.out.lower().endswith(".fold"):
+        write_fold(pattern, args.out)
+    else:
+        to_svg(pattern, args.out)
+    print(f"wrote {args.out}")
+    err = flap_length_errors(packing, pattern)
+    report = foldability_report(pattern)
+    n_int = len(report.vertices)
+    n_kaw = sum(1 for v in report.vertices if v.kawasaki)
+    n_mae = sum(1 for v in report.vertices if v.maekawa)
+    print(f"  packing scale     : {packing.scale:.4f}")
+    print(f"  max flap error    : {err.max() * 100:.2f}%")
+    print(f"  Kawasaki          : {n_kaw}/{n_int} interior vertices pass")
+    print(f"  Maekawa           : {n_mae}/{n_int} interior vertices pass")
+
+
+def _instructions(args) -> None:
+    """Write a printable step-by-step folding instruction sheet (SVG).
+
+    The input is either a ``.fold`` crease pattern or a photo: a photo is first
+    turned into a hand-foldable crease pattern (silhouette relief, ``--foldable``
+    budget, default ``easy``) so the instructions stay short. Each numbered panel
+    highlights the creases folded so far in mountain/valley colours.
+    """
+    import os
+    from foldforge.fabricate import fold_instructions_svg
+
+    ext = os.path.splitext(args.pattern)[1].lower()
+    if ext == ".fold":
+        pattern = read_fold(args.pattern)
+    else:                                                # treat as a photo
+        from foldforge.origamize import origamize_silhouette
+        result, _ = origamize_silhouette(args.pattern, foldable=args.foldable,
+                                         engine=args.engine)
+        pattern = result.pattern
+    steps = fold_instructions_svg(pattern, args.out)
+    print(f"wrote {args.out}  ({steps} fold steps)")
 
 
 def _export(args) -> None:
     """Export a FOLD pattern to a layered SVG or DXF for a cutter."""
     from foldforge.fabricate import to_svg, to_dxf
     pattern = read_fold(args.path)
-    (to_dxf if args.out.lower().endswith(".dxf") else to_svg)(pattern, args.out)
+    if args.out.lower().endswith(".dxf"):
+        to_dxf(pattern, args.out)
+    else:
+        to_svg(pattern, args.out, outline_only=args.outline)
     print(f"wrote {args.out}")
 
 
@@ -183,14 +248,21 @@ def main(argv: list[str] | None = None) -> None:
                    help="estimate the subject's shape (segment + inflate)")
     p.add_argument("--depth", action="store_true",
                    help="estimate real 3D relief with a monocular depth model (needs torch)")
-    p.add_argument("--depth-model", choices=["MiDaS_small", "DPT_Hybrid"],
+    p.add_argument("--depth-model",
+                   choices=["MiDaS_small", "DPT_Hybrid",
+                            "depth_anything_v2_small", "depth_anything_v2_base"],
                    default="MiDaS_small",
-                   help="depth network for --depth (DPT_Hybrid is sharper but "
-                        "heavier and needs timm; default MiDaS_small)")
+                   help="depth network for --depth. DPT_Hybrid is sharper but "
+                        "heavier and needs timm; depth_anything_v2_small/_base use "
+                        "Depth Anything V2 (needs transformers) and are often "
+                        "sharper on fine detail; default MiDaS_small")
     p.add_argument("--engine", choices=["corrugation", "miura2d"],
                    default="corrugation",
                    help="corrugation (1D pleated strips, default) or miura2d "
                         "(true 2D warped-Miura tessellation, far better on curves)")
+    p.add_argument("--foldable", choices=["easy", "medium", "hard"], default=None,
+                   help="hand-fold budget: easy/medium cap the crease count so a "
+                        "human can fold it (tens of creases); hard = full detail")
     p.add_argument("--symmetry", choices=["off", "auto", "x", "y"], default="off",
                    help="mirror-symmetrize the subject (silhouette/depth): auto "
                         "detects the axis, x/y force top-bottom / left-right "
@@ -207,15 +279,27 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--detail", choices=["rough", "medium", "fine"], default=None,
                    help="fold-count preset: rough=12, medium=24, fine=40 "
                         "(alias for --folds)")
+    p.add_argument("--foldable", choices=["easy", "medium", "hard"], default=None,
+                   help="hand-fold budget: easy/medium cap the crease count so a "
+                        "human can fold the pattern by hand (tens of creases, not "
+                        "hundreds); hard keeps full detail. Overrides --folds/--detail. "
+                        "Still a coarse relief/corrugation, not figurative origami.")
     p.add_argument("--style", choices=["smooth", "origami"], default="smooth",
                    help="smooth (rounded relief) or origami (few large flat "
                         "facets with sharp creases)")
     p.add_argument("--open-sheet", action="store_true",
                    help="keep the one-sided open relief (default: closed watertight solid)")
+    p.add_argument("--rect-sheet", action="store_true",
+                   help="keep the FULL rectangular sheet (flat background paper at "
+                        "the baseline, subject relief within it) instead of trimming "
+                        "the export to the subject silhouette")
     p.add_argument("--depth", action="store_true",
                    help="estimate real 3D relief with a monocular depth model (needs torch)")
-    p.add_argument("--depth-model", choices=["MiDaS_small", "DPT_Hybrid"],
-                   default="MiDaS_small", help="depth network for --depth")
+    p.add_argument("--depth-model",
+                   choices=["MiDaS_small", "DPT_Hybrid",
+                            "depth_anything_v2_small", "depth_anything_v2_base"],
+                   default="MiDaS_small", help="depth network for --depth "
+                   "(depth_anything_v2_small/_base need transformers)")
     p.add_argument("--engine", choices=["corrugation", "miura2d"],
                    default="corrugation",
                    help="corrugation (1D pleated strips, default) or miura2d "
@@ -227,9 +311,30 @@ def main(argv: list[str] | None = None) -> None:
                         "leaves it as shot. Great for a butterfly's wings.")
     p.set_defaults(func=_fold)
 
+    p = sub.add_parser("design",
+                       help="figurative origami: circle-pack a stick-figure tree")
+    from foldforge.design import BUILTIN_TREES
+    p.add_argument("tree", help=", ".join(BUILTIN_TREES))
+    p.add_argument("out", help="output .svg (crease pattern) or .fold")
+    p.set_defaults(func=_design)
+
+    p = sub.add_parser("instructions",
+                       help="printable step-by-step folding sheet (SVG)")
+    p.add_argument("pattern", help="input .fold crease pattern, or a photo")
+    p.add_argument("out", help="output .svg path")
+    p.add_argument("--foldable", choices=["easy", "medium", "hard"], default="easy",
+                   help="photo input only: hand-fold budget (default easy) so the "
+                        "instructions stay a dozen steps, not hundreds")
+    p.add_argument("--engine", choices=["corrugation", "miura2d"],
+                   default="corrugation", help="photo input only: fold engine")
+    p.set_defaults(func=_instructions)
+
     p = sub.add_parser("export", help="export a .fold to layered SVG/DXF (cutter)")
     p.add_argument("path", help="input .fold path")
     p.add_argument("out", help="output .svg or .dxf path")
+    p.add_argument("--outline", action="store_true",
+                   help="SVG only: draw one clean sheet outline instead of every "
+                        "panel edge (a printable hand-fold sheet: outline + M/V creases)")
     p.set_defaults(func=_export)
 
     args = parser.parse_args(argv)

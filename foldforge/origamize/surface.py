@@ -20,6 +20,68 @@ from foldforge.design.inverse import (
 from foldforge.diff.kinematics import fold_chain
 
 
+# --- hand-foldability: crease budget, count, and difficulty -----------------
+
+# Fold-budget presets -> a `folds` value (cells across the subject's longer
+# side) that drives the existing coarseness knob. "hard" keeps the caller's
+# current (detailed) resolution. Easy/Medium give a genuinely hand-foldable
+# corrugation of tens of creases; it is still a coarse relief/corrugation, NOT
+# figurative origami (it will not fold into a crane).
+_FOLD_BUDGET = {"easy": 14, "medium": 26, "hard": None}
+
+
+def budget_folds(level, default=None):
+    """Map a fold-budget preset (``"easy"``/``"medium"``/``"hard"``) to a
+    ``folds`` value. ``"hard"`` (or ``None``) keeps ``default`` (current
+    detail). Unknown levels raise ``ValueError``."""
+    if level is None:
+        return default
+    key = str(level).strip().lower()
+    if key not in _FOLD_BUDGET:
+        raise ValueError(
+            f"unknown fold budget {level!r}; choose easy, medium, or hard")
+    f = _FOLD_BUDGET[key]
+    return default if f is None else f
+
+
+def difficulty_label(crease_count: int) -> str:
+    """A hand-folding difficulty label from a crease (fold-line) count."""
+    if crease_count <= 24:
+        return "Easy"
+    if crease_count <= 60:
+        return "Medium"
+    return "Hard (machine)"
+
+
+def crease_stats(pattern):
+    """``(crease_count, difficulty)`` for a crease pattern.
+
+    ``crease_count`` is the number of *distinct* mountain/valley fold lines a
+    human would actually crease: collinear M/V edges lying on one infinite line
+    are merged (an extruded pleat is a single fold across the sheet, not one per
+    panel), and flat/border edges are ignored. The label comes from
+    :func:`difficulty_label`. Tens of folds read as hand-foldable; hundreds are
+    machine-only. This measures a coarse corrugation's real fold workload; it is
+    not a claim of figurative-origami feasibility.
+    """
+    V = np.asarray(pattern.vertices, dtype=float)[:, :2]
+    lines = set()
+    for (a, b), k in zip(np.asarray(pattern.edges), pattern.assignment):
+        if k not in ("M", "V"):
+            continue
+        p, q = V[int(a)], V[int(b)]
+        d = q - p
+        n = float(np.hypot(d[0], d[1]))
+        if n < 1e-9:
+            continue
+        theta = np.arctan2(d[1], d[0]) % np.pi          # line direction mod pi
+        nx, ny = -np.sin(theta), np.cos(theta)          # unit normal for offset
+        offset = nx * p[0] + ny * p[1]
+        lines.add((k, round(theta, 2), round(offset, 1)))
+    count = len(lines)
+    return count, difficulty_label(count)
+
+
 @dataclass
 class OrigamiResult:
     """A decomposed target: the crease pattern, the folded shape, and the error."""
@@ -31,6 +93,16 @@ class OrigamiResult:
     error: float                  # Chamfer distance, folded vs target
     triangles: object = None      # (T, 3) triangles indexing `folded` (for 3D export)
     solid: object = None          # optional closed (vertices, triangles) watertight mesh
+
+    @property
+    def crease_count(self) -> int:
+        """Distinct M/V fold lines in the crease pattern (see :func:`crease_stats`)."""
+        return crease_stats(self.pattern)[0]
+
+    @property
+    def difficulty(self) -> str:
+        """Hand-folding difficulty label for the crease pattern."""
+        return crease_stats(self.pattern)[1]
 
 
 def origamize_profile(profile: np.ndarray, n_pleats: int = 28, width: float = 6.0,

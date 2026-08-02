@@ -485,11 +485,11 @@ HTML = r"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <div id="status"></div>
 <div id="ui">
  <select id="shape" title="Pick a built-in shape or a baked sample to fold. Uploaded photos and opened .fold files also appear in this list."></select>
- <select id="detail" title="Fold detail for a dropped image: fewer/bigger folds vs. finer relief">
-  <option value="10">Detail: Rough</option>
-  <option value="16">Detail: Medium</option>
-  <option value="24" selected>Detail: Fine</option>
-  <option value="36">Detail: Extra</option>
+ <select id="detail" title="How hard the folded pattern is to make by hand: Easy/Medium are foldable by hand (tens of creases); Detailed/Extra are dense relief only a machine reproduces cleanly.">
+  <option value="10">Easy (~9 folds, by hand)</option>
+  <option value="16">Medium (~15 folds, by hand)</option>
+  <option value="24" selected>Detailed (~23 folds, machine)</option>
+  <option value="36">Extra (~35 folds, machine)</option>
  </select>
  <select id="foldmode" title="Fold every crease together, or one crease after another like instructions">
   <option value="all" selected>Fold: all at once</option>
@@ -503,6 +503,10 @@ HTML = r"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
   <option value="off">Symmetry: Off</option>
   <option value="auto" selected>Symmetry: Auto</option>
   <option value="force">Symmetry: Force</option>
+ </select>
+ <select id="enginemode" title="Corrugation: fast 1-D pleat chain per row (a ridge). 2-D Miura: run a live, coarse warped-Miura fit on your photo's height field (a genuine 2-D folded surface) — slower, capped grid + iterations; the offline Python engine is higher quality.">
+  <option value="corrugation" selected>Engine: Corrugation (fast)</option>
+  <option value="miura">Engine: 2-D Miura (live fit)</option>
  </select>
  <!-- actions -->
  <button id="uploadBtn" title="Upload a photo (JPG or PNG) and fold it into a 3D relief. You can also drag an image anywhere onto the page.">&#128247; Upload photo</button>
@@ -910,6 +914,107 @@ function buildImageShape(img,nx,ny,mode,seg){
   const chain={kind:'rows',rows:rows.map(r=>({a:r.angles,s:r.seg,sx:0,sz:0})),ys:ys,nx:nx,ny:ny,c:[cx,cy,cz]};
   return {frames:frames,triangles:tris,creases:[],target:segl,uv:uv,tex:tex,chain:chain,nx:nx,ny:ny,seg:seg||null,mode:mode,label:subj?'Your image (3D subject)':'Your image (brightness relief)'};
 }
+// ----- live 2-D Miura fit: a coarse JS port of origamize/miura_fit._fit_warped_miura -----
+// Jointly optimise the flat pattern Q (z=0) and folded surface P (3D) by Adam over
+// fidelity (folded heights -> target), isometry (folded edge len == flat edge len)
+// and a footprint anchor. Capped grid + iterations so it runs live in ~1-2s; the
+// offline Python engine (foldforge/origamize/miura_fit.py) is the high-quality one.
+function _flatMiura(R,C,a,b,gamma){const Q=new Float64Array(R*C*3);
+  for(let j=0;j<R;j++)for(let i=0;i<C;i++){const n=(j*C+i)*3;
+    Q[n]=i*a+(j&1)*b*Math.cos(gamma); Q[n+1]=j*b*Math.sin(gamma); Q[n+2]=0;} return Q;}
+function _foldedMiura(R,C,a,b,gamma,h){const P=new Float64Array(R*C*3);
+  const w=Math.sqrt(a*a-h*h), sx=a*b*Math.cos(gamma)/w, d=Math.sqrt(Math.max(b*b-sx*sx,0));
+  for(let j=0;j<R;j++)for(let i=0;i<C;i++){const n=(j*C+i)*3;
+    P[n]=i*w+(j&1)*sx; P[n+1]=j*d; P[n+2]=(i&1)*h;} return P;}
+function _miuraEdges(R,C){const E=[]; const idx=(j,i)=>j*C+i;
+  for(let j=0;j<R;j++)for(let i=0;i<C;i++){
+    if(i+1<C)E.push([idx(j,i),idx(j,i+1)]);
+    if(j+1<R)E.push([idx(j,i),idx(j+1,i)]);
+    if(i+1<C&&j+1<R)E.push([idx(j,i),idx(j+1,i+1)]);} return E;}
+// best (scale,offset) least-squares fit of z onto target, then normalised RMSE over range
+function _fitError(P,R,C,Z){const N=R*C; const zs=new Float64Array(N);
+  for(let n=0;n<N;n++)zs[n]=P[n*3+2];
+  for(let j=0;j<R;j++)for(let i=1;i<C-1;i++){const b=j*C; zs[b+i]=(P[(b+i-1)*3+2]+2*P[(b+i)*3+2]+P[(b+i+1)*3+2])/4;}  // midsurface: smooth the along-column ripple, same as Python
+  let sz=0,szz=0,st=0,szt=0,mn=1e18,mx=-1e18;
+  for(let j=0;j<R;j++)for(let i=0;i<C;i++){const t=Z[j][i],z=zs[j*C+i]; sz+=z;szz+=z*z;st+=t;szt+=z*t; if(t<mn)mn=t; if(t>mx)mx=t;}
+  const det=szz*N-sz*sz, s=Math.abs(det)<1e-12?0:(szt*N-sz*st)/det, o=(st-s*sz)/N;
+  let se=0; for(let j=0;j<R;j++)for(let i=0;i<C;i++){const e=s*zs[j*C+i]+o-Z[j][i]; se+=e*e;}
+  return Math.sqrt(se/N)/((mx-mn)+1e-9);}
+function fitMiura2D(Z,R,C,opts){opts=opts||{};
+  const iters=opts.iters||300, wiso=opts.wiso||4.0, wfit=opts.wfit||1.0, wanc=opts.wanc||0.04,
+        lr=opts.lr||0.02, relief=opts.relief||1.6, a=1.0,b=1.0,gamma=Math.PI/3,h0=0.45, N=R*C;
+  const Q=_flatMiura(R,C,a,b,gamma), P=_foldedMiura(R,C,a,b,gamma,h0);
+  // target: normalise Z to [0,1] * relief; anchor keeps the footprint a height field
+  let zmn=1e18,zmx=-1e18; for(let j=0;j<R;j++)for(let i=0;i<C;i++){const v=Z[j][i]; if(v<zmn)zmn=v; if(v>zmx)zmx=v;}
+  const Zt=new Float64Array(N); for(let j=0;j<R;j++)for(let i=0;i<C;i++)Zt[j*C+i]=(Z[j][i]-zmn)/((zmx-zmn)+1e-9)*relief;
+  const ax=new Float64Array(N),ay=new Float64Array(N);
+  for(let n=0;n<N;n++){ax[n]=P[n*3];ay[n]=P[n*3+1]; P[n*3+2]+=Zt[n];}   // fold the target relief onto the flat Miura z
+  const E=_miuraEdges(R,C), M=E.length;
+  const gP=new Float64Array(N*3),gQ=new Float64Array(N*3);
+  const mP=new Float64Array(N*3),vP=new Float64Array(N*3),mQ=new Float64Array(N*3),vQ=new Float64Array(N*3);
+  const b1=0.9,b2=0.999,eps=1e-8;
+  for(let t=1;t<=iters;t++){
+    gP.fill(0); gQ.fill(0);
+    for(let n=0;n<N;n++){gP[n*3+2]+=2*wfit*(P[n*3+2]-Zt[n]);
+      gP[n*3]+=2*wanc*(P[n*3]-ax[n]); gP[n*3+1]+=2*wanc*(P[n*3+1]-ay[n]);}
+    for(let k=0;k<M;k++){const a0=E[k][0],a1=E[k][1];
+      const dx=P[a0*3]-P[a1*3],dy=P[a0*3+1]-P[a1*3+1],dz=P[a0*3+2]-P[a1*3+2];
+      const lp=Math.sqrt(dx*dx+dy*dy+dz*dz)+1e-12;
+      const qx=Q[a0*3]-Q[a1*3],qy=Q[a0*3+1]-Q[a1*3+1],qz=Q[a0*3+2]-Q[a1*3+2];
+      const lq=Math.sqrt(qx*qx+qy*qy+qz*qz)+1e-12, r=lp-lq;
+      const cp=2*wiso*r/lp; gP[a0*3]+=cp*dx;gP[a0*3+1]+=cp*dy;gP[a0*3+2]+=cp*dz;
+      gP[a1*3]-=cp*dx;gP[a1*3+1]-=cp*dy;gP[a1*3+2]-=cp*dz;
+      const cq=2*wiso*(-r)/lq; gQ[a0*3]+=cq*qx;gQ[a0*3+1]+=cq*qy;gQ[a0*3+2]+=cq*qz;
+      gQ[a1*3]-=cq*qx;gQ[a1*3+1]-=cq*qy;gQ[a1*3+2]-=cq*qz;}
+    const bc1=1-Math.pow(b1,t), bc2=1-Math.pow(b2,t);
+    for(let n=0;n<N*3;n++){
+      mP[n]=b1*mP[n]+(1-b1)*gP[n]; vP[n]=b2*vP[n]+(1-b2)*gP[n]*gP[n];
+      P[n]-=lr*(mP[n]/bc1)/(Math.sqrt(vP[n]/bc2)+eps);
+      mQ[n]=b1*mQ[n]+(1-b1)*gQ[n]; vQ[n]=b2*vQ[n]+(1-b2)*gQ[n]*gQ[n];
+      Q[n]-=lr*(mQ[n]/bc1)/(Math.sqrt(vQ[n]/bc2)+eps);}
+  }
+  return {P:P,Q:Q,error:_fitError(P,R,C,Z),iters:iters};}
+// build an uploaded photo as a live 2-D Miura fold (opt-in engine). Reuses the same
+// height field the corrugation path folds, capped to a coarse grid for a live fit.
+function buildMiuraShape(img,nx,ny,mode,seg){
+  const MAXG=20; const C=Math.min(nx,MAXG), R=Math.min(ny,MAXG);   // cap the grid so the fit stays under a couple of seconds
+  const height=6,length=24,width=length*R/C;
+  const subj=(mode==='subject'&&seg);
+  const hs=subj?0.38*Math.min(length,width):height;
+  const Z=subj?subjectHeightfield(seg,C,R,hs,0):imageHeightfield(img,C,R,height,0);
+  const t0=performance.now();
+  const fit=fitMiura2D(Z,R,C,{iters:300});
+  const runtime=performance.now()-t0;
+  // scale folded P to the physical footprint + height (mirrors origamize_miura)
+  const P=fit.P, N=R*C; let x0=1e18,y0=1e18,x1=-1e18,y1=-1e18,z0=1e18,z1=-1e18;
+  for(let n=0;n<N;n++){const x=P[n*3],y=P[n*3+1],z=P[n*3+2];
+    if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;if(z<z0)z0=z;if(z>z1)z1=z;}
+  const sx=length/((x1-x0)+1e-9), sy=width/((y1-y0)+1e-9), sz=height/((z1-z0)+1e-9);
+  const V0=[];   // folded vertices, centred
+  let cx=0,cy=0,cz=0;
+  const vx=new Float64Array(N),vy=new Float64Array(N),vz=new Float64Array(N);
+  for(let n=0;n<N;n++){vx[n]=(P[n*3]-x0)*sx; vy[n]=(P[n*3+1]-y0)*sy; vz[n]=(P[n*3+2]-z0)*sz; cx+=vx[n];cy+=vy[n];cz+=vz[n];}
+  cx/=N;cy/=N;cz/=N;
+  const NF=20, frames=[];   // flat plane -> folded relief (z rises with the fold fraction)
+  for(let fi=0;fi<NF;fi++){const f=0.04+(1-0.04)*fi/(NF-1),Vf=[];
+    for(let n=0;n<N;n++)Vf.push([vx[n]-cx, vy[n]-cy, (vz[n]-cz)*f]);
+    frames.push(Vf);}
+  const idx=(j,i)=>j*C+i, tris=[];
+  for(let j=0;j<R-1;j++)for(let i=0;i<C-1;i++) tris.push([idx(j,i),idx(j,i+1),idx(j+1,i+1)],[idx(j,i),idx(j+1,i+1),idx(j+1,i)]);
+  // flat target grid overlay + UVs + texture, as corrugation does
+  const segl=[]; const T=[];
+  for(let j=0;j<R;j++)for(let i=0;i<C;i++) T.push([(i/(C-1))*length-cx,(j/(R-1))*width-cy,0]);
+  for(let j=0;j<R;j++)for(let i=0;i<C-1;i++) segl.push(...T[idx(j,i)],...T[idx(j,i+1)]);
+  for(let j=0;j<R-1;j++)for(let i=0;i<C;i++) segl.push(...T[idx(j,i)],...T[idx(j+1,i)]);
+  const uv=[];
+  if(subj){const [bx0,by0,bx1,by1]=seg.bbox;
+    for(let j=0;j<R;j++)for(let i=0;i<C;i++) uv.push((bx0+(i/(C-1))*(bx1-bx0))/(seg.w-1),1-(by0+(j/(R-1))*(by1-by0))/(seg.h-1));}
+  else for(let j=0;j<R;j++)for(let i=0;i<C;i++) uv.push(i/(C-1),1-j/(R-1));
+  const tex=new THREE.Texture(img); tex.needsUpdate=true; tex.colorSpace=THREE.SRGBColorSpace;
+  return {frames:frames,triangles:tris,creases:[],target:segl,uv:uv,tex:tex,nx:C,ny:R,seg:seg||null,mode:mode,
+    fitInfo:{iters:fit.iters,error:fit.error,runtime:runtime,R:R,C:C},
+    label:'Your image (live 2-D Miura fit)'};
+}
 // ===== embedded PBD rigid-origami solver (folds loaded .fold patterns live) =====
 function foldModelFromFold(fold){
   const vc=fold.vertices_coords||[], ev=fold.edges_vertices||[],
@@ -1021,7 +1126,7 @@ el.addEventListener('pointerdown',e=>{down=true;px=e.clientX;py=e.clientY});
 addEventListener('pointerup',()=>down=false);
 addEventListener('pointermove',e=>{if(!down)return;rz+=(e.clientX-px)*0.01;rx+=(e.clientY-py)*0.01;px=e.clientX;py=e.clientY;});
 addEventListener('wheel',e=>{camera.position.multiplyScalar(1+Math.sign(e.deltaY)*0.08);},{passive:true});
-let playing=true,t=0,dir=1,stepMode=false,lastImg=null,lastImgUrl=null,detailNx=24,shapeMode='subject',heatOn=true,photoTex=false,symMode='auto';
+let playing=true,t=0,dir=1,stepMode=false,lastImg=null,lastImgUrl=null,detailNx=24,shapeMode='subject',heatOn=true,photoTex=false,symMode='auto',engineMode='corrugation';
 const slider=document.getElementById('slider'),pct=document.getElementById('pct'),play=document.getElementById('play'),sel=document.getElementById('shape');
 const detail=document.getElementById('detail'),foldmode=document.getElementById('foldmode');
 foldmode.addEventListener('change',()=>{stepMode=(foldmode.value==='step');});
@@ -1035,6 +1140,8 @@ const heatBtn=document.getElementById('heatBtn'),pipeline=document.getElementByI
 const stageInput=document.getElementById('pstage-input'),stageHeight=document.getElementById('pstage-height'),stageSym=document.getElementById('pstage-sym');
 const symmode=document.getElementById('symmode');
 symmode.addEventListener('change',()=>{symMode=symmode.value; rebuildImage();});
+const enginemode=document.getElementById('enginemode');
+enginemode.addEventListener('change',()=>{engineMode=enginemode.value; rebuildImage();});
 const galleryBtn=document.getElementById('galleryBtn'),galleryPanel=document.getElementById('gallery');
 galleryBtn.addEventListener('click',()=>{const open=galleryPanel.style.display!=='block';
   galleryPanel.style.display=open?'block':'none'; galleryBtn.classList.toggle('on',open);});
@@ -1102,7 +1209,7 @@ function rebuildImage(){ if(!lastImg)return;
   let ny;
   if(shapeMode==='subject'){const bw=seg.bbox[2]-seg.bbox[0]+1,bh=seg.bbox[3]-seg.bbox[1]+1; ny=Math.max(6,Math.round(nx*bh/Math.max(1,bw)));}
   else ny=computeNy(lastImg,nx);
-  const shape=buildImageShape(lastImg,nx,ny,shapeMode,seg);
+  const shape=(engineMode==='miura')?buildMiuraShape(lastImg,nx,ny,shapeMode,seg):buildImageShape(lastImg,nx,ny,shapeMode,seg);
   shape.segRaw=segRaw; shape.sym=sym; shape.engine='in-browser k-means + chamfer-DT inflation';
   const prevUp=DATA.shapes['__up'];        // dispose the previous fold's texture (overwrite leak)
   if(prevUp){ if(prevUp.tex&&prevUp.tex.dispose)prevUp.tex.dispose();
@@ -1115,7 +1222,10 @@ function rebuildImage(){ if(!lastImg)return;
   const info=(shapeMode==='subject')?('subject '+Math.round(rawSeg.frac*100)+'% of frame'):'brightness relief';
   let smsg='';
   if(sym) smsg=' · mirror-IoU '+sym.iou.toFixed(2)+(sym.applied?' (symmetrized)':' (< 0.80, left as-is)');
-  setStatus('Folded '+nm+' — '+info+', '+iw+'×'+ih+', '+(nx-1)+' folds'+smsg,'ok');
+  const folds=nx-1;
+  if(shape.fitInfo){const fi=shape.fitInfo;
+    setStatus('Folded '+nm+' — live 2-D Miura fit on a '+fi.R+'×'+fi.C+' grid: '+fi.iters+' iterations, fidelity error '+fi.error.toFixed(3)+', '+Math.round(fi.runtime)+' ms. Coarse live fit — the offline Python engine is higher quality.'+smsg,'ok');}
+  else setStatus('Folded '+nm+' — '+info+', '+iw+'×'+ih+', '+folds+' folds ('+diffLabel(folds)+')'+smsg,'ok');
 }
 DATA.order.forEach(n=>{const o=document.createElement('option');o.value=n;o.textContent=DATA.shapes[n].label||n;sel.appendChild(o);});
 // showcase gallery: one card per baked sample (marked by an `engine` label),
@@ -1140,6 +1250,9 @@ sel.addEventListener('change',()=>{buildShape(sel.value);t=0;dir=1;playing=true;
 slider.addEventListener('input',()=>{playing=false;play.innerHTML='&#9654; Play fold';t=parseFloat(slider.value);});
 play.addEventListener('click',()=>{playing=!playing;play.innerHTML=playing?'&#10073;&#10073; Pause fold':'&#9654; Play fold';});
 const statusEl=document.getElementById('status');
+// hand-fold difficulty from the crease (fold-line) count — same thresholds as the
+// Python foldforge.origamize.difficulty_label, so the studio and CLI agree.
+function diffLabel(n){ return n<=24?'Easy':(n<=60?'Medium':'Hard, machine'); }
 function setStatus(msg,kind){ if(!msg){statusEl.style.display='none';return;} statusEl.textContent=msg; statusEl.className=kind||''; statusEl.style.display='block'; }
 // load an image File -> fold it; a visible status message on both success and failure (undecodable formats no longer fail silently)
 function foldImageFile(file){

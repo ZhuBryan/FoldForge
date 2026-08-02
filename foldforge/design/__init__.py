@@ -16,6 +16,18 @@ from foldforge.design.inverse import (
     target_wave,
     target_step,
 )
+from foldforge.design.treemaker import (
+    MetricTree,
+    star_tree,
+    get_tree,
+    BUILTIN_TREES,
+    Packing,
+    pack_tree,
+    crease_pattern,
+    design_base,
+    flap_length_errors,
+    folded_schematic,
+)
 
 __all__ = [
     "fit_chain",
@@ -26,4 +38,14 @@ __all__ = [
     "target_arch",
     "target_wave",
     "target_step",
+    "MetricTree",
+    "star_tree",
+    "get_tree",
+    "BUILTIN_TREES",
+    "Packing",
+    "pack_tree",
+    "crease_pattern",
+    "design_base",
+    "flap_length_errors",
+    "folded_schematic",
 ]

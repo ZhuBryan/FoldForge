@@ -19,6 +19,13 @@ Two models are wired:
   backbone. Its own preprocessing mirrors MiDaS' ``dpt_transform``: a
   *minimal* keep-aspect resize to multiples of 32 near 384 and ``[-1, 1]``
   normalisation (mean/std 0.5), which is what the checkpoint was trained with.
+* ``depth_anything_v2_small`` (~99 MB) / ``depth_anything_v2_base`` (~371 MB) -
+  Depth Anything V2, loaded via the ``transformers`` depth-estimation pipeline.
+  Often noticeably sharper than MiDaS small on fine detail. The pipeline owns its
+  own preprocessing, so these bypass ``_CONFIG``; their raw output is disparity-
+  like (larger = nearer, same convention as MiDaS' inverse depth) and is
+  normalised to ``0..1`` (1 = nearest) so reliefs match the MiDaS path exactly.
+  ``transformers`` is an optional, lazily-imported dependency.
 
 PyTorch is optional: this module imports without it and raises a clear
 ``ImportError`` only when a depth model is actually requested (naming ``timm``
@@ -153,6 +160,51 @@ _LOADERS = {
 }
 
 
+# Depth Anything V2 backends: model_type -> HuggingFace repo id. Loaded lazily
+# via the transformers depth-estimation pipeline (optional dependency).
+_DA_MODELS = {
+    "depth_anything_v2_small": "depth-anything/Depth-Anything-V2-Small-hf",
+    "depth_anything_v2_base": "depth-anything/Depth-Anything-V2-Base-hf",
+}
+_DA_PIPELINES: dict = {}        # model_type -> loaded transformers pipeline (cached)
+
+
+def _load_depth_anything(model_type: str):
+    """Load and cache a Depth Anything V2 pipeline (needs ``transformers``)."""
+    if model_type in _DA_PIPELINES:
+        return _DA_PIPELINES[model_type]
+    _require_torch()                       # clearest error if torch is missing
+    try:
+        from transformers import pipeline
+    except ImportError as exc:
+        raise ImportError(
+            "the Depth Anything v2 depth models need the `transformers` package. "
+            "Install it with `pip install transformers` (or use the default "
+            "model_type='MiDaS_small', which needs only PyTorch)."
+        ) from exc
+    pipe = pipeline("depth-estimation", model=_DA_MODELS[model_type], device=-1)
+    _DA_PIPELINES[model_type] = pipe
+    return pipe
+
+
+def _estimate_depth_anything(image, model_type: str) -> np.ndarray:
+    """Depth Anything V2 depth map, normalised to the MiDaS 0..1 (1=near) convention."""
+    import cv2
+    from PIL import Image
+    pipe = _load_depth_anything(model_type)
+    rgb = _load_rgb(image)                                  # HxWx3 RGB uint8
+    h, w = rgb.shape[:2]
+    out = pipe(Image.fromarray(rgb))
+    # ``predicted_depth`` is the raw network output (disparity-like: larger =
+    # nearer, matching MiDaS' inverse depth), before the pipeline's 0-255 vis.
+    pred = out["predicted_depth"]
+    d = np.asarray(pred).squeeze().astype(float)
+    if d.shape != (h, w):                                  # net-res -> original
+        d = cv2.resize(d, (w, h), interpolation=cv2.INTER_CUBIC)
+    d = d - d.min()
+    return d / (d.max() + 1e-9)                            # 1 = nearest, 0 = farthest
+
+
 def _load_model(model_type: str = "MiDaS_small"):
     """Load and cache a depth model (repos + weights fetched once)."""
     if model_type in _MODELS:
@@ -216,9 +268,13 @@ def estimate_depth(image, model_type: str = "MiDaS_small") -> np.ndarray:
 
     ``image`` is a path or an ``HxWx3`` RGB / ``HxW`` array. Returns an ``HxW``
     float array in ``0..1`` where **1 = nearest** the camera and 0 = farthest.
-    ``model_type`` is ``'MiDaS_small'`` (default) or ``'DPT_Hybrid'`` (sharper,
-    heavier, needs ``timm``). Requires PyTorch; checkpoints download once.
+    ``model_type`` is ``'MiDaS_small'`` (default), ``'DPT_Hybrid'`` (sharper,
+    heavier, needs ``timm``), or ``'depth_anything_v2_small'`` /
+    ``'depth_anything_v2_base'`` (Depth Anything V2 via ``transformers``, often
+    sharper on fine detail). Requires PyTorch; checkpoints download once.
     """
+    if model_type in _DA_MODELS:
+        return _estimate_depth_anything(image, model_type)
     torch = _require_torch()
     import cv2
     if model_type not in _CONFIG:
@@ -304,7 +360,8 @@ def origamize_depth(source, grid=(30, 30), height: float = 6.0,
                     model_type: str = "MiDaS_small", closed: bool = False,
                     close_mode: str = "mirror", close_base: float = 0.0,
                     folds=None, style: str = "smooth", levels: int = 5,
-                    engine: str = "corrugation", symmetry: str = "off"):
+                    engine: str = "corrugation", symmetry: str = "off",
+                    foldable=None, rect_sheet: bool = False):
     """Estimate the subject's 3D relief from monocular depth and fold it.
 
     Mirrors :func:`foldforge.origamize.vision.origamize_silhouette` but uses a
@@ -325,6 +382,8 @@ def origamize_depth(source, grid=(30, 30), height: float = 6.0,
     side, the back is a mirrored *estimate* - a two-sheet folded model, not
     single-sheet origami. ``close_mode`` is ``"mirror"`` or ``"flat"``.
     """
+    from foldforge.origamize.surface import budget_folds
+    folds = budget_folds(foldable, folds)
     size = max(float(length), float(width))
     Z, L, W = depth_relief(source, grid=grid, smooth=smooth, rect=rect,
                            model_type=model_type, folds=folds, style=style,
@@ -335,5 +394,8 @@ def origamize_depth(source, grid=(30, 30), height: float = 6.0,
     from foldforge.origamize.io import fold_heightfield
     result = fold_heightfield(Z * height, length=L, width=W, engine=engine)
     if closed:
+        # The depth path never trims background (the whole sheet is folded relief),
+        # so ``rect_sheet`` is accepted for a uniform CLI but is a no-op here: the
+        # exported solid already keeps the full rectangular sheet.
         result.solid = close_relief(result, mode=close_mode, base=close_base)
     return result, Z

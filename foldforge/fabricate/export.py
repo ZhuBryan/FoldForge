@@ -62,18 +62,35 @@ def _scaled_xy(pattern: CreasePattern, size_mm: float, margin_mm: float):
 
 
 def to_svg(pattern: CreasePattern, path: str | Path, *, size_mm: float = 200.0,
-           margin_mm: float = 10.0, stroke_mm: float = 0.3) -> None:
+           margin_mm: float = 10.0, stroke_mm: float = 0.3,
+           outline_only: bool = False) -> None:
     """Write ``pattern`` as a layered SVG sized in millimetres (one Inkscape
     layer per fold type, so a cutter can map layers to cut/score operations).
+
+    With ``outline_only=True`` the border/cut layer is drawn as a single sheet
+    rectangle (the bounding box) instead of every internal panel edge, so a
+    coarse corrugation prints as a clean hand-fold sheet: the paper outline plus
+    the coloured mountain/valley creases, with no misleading grid of "cut"
+    lines. Fold (M/V/facet/score) creases are unchanged.
     """
     p, w, h = _scaled_xy(pattern, size_mm, margin_mm)
     facet = set(int(i) for i in pattern.metadata.get("facet_edges", []))
     layers: dict = {}
     for k, ((a, b), kind) in enumerate(zip(pattern.edges, pattern.assignment)):
+        if outline_only and kind == "B" and k not in facet:
+            continue                                    # replaced by one outline rect
         name, colour = _FACET_LAYER if k in facet else _LAYER.get(kind, _LAYER["U"])
         layers.setdefault((name, colour), []).append(
             f'<line x1="{p[a,0]:.3f}" y1="{p[a,1]:.3f}" '
             f'x2="{p[b,0]:.3f}" y2="{p[b,1]:.3f}" stroke="{colour}" '
+            f'stroke-width="{stroke_mm}"/>'
+        )
+    if outline_only:                                    # one clean sheet outline
+        name, colour = _LAYER["B"]
+        x0, y0 = margin_mm, margin_mm
+        layers.setdefault((name, colour), []).append(
+            f'<rect x="{x0:.3f}" y="{y0:.3f}" width="{w - 2 * margin_mm:.3f}" '
+            f'height="{h - 2 * margin_mm:.3f}" fill="none" stroke="{colour}" '
             f'stroke-width="{stroke_mm}"/>'
         )
     out = [

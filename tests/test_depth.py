@@ -64,6 +64,34 @@ def test_estimate_depth_rejects_unknown_model():
         estimate_depth(_subject_on_noisy_bg(), model_type="DPT_Nonexistent")
 
 
+def test_depth_anything_dispatch_is_routed(monkeypatch):
+    """`depth_anything_v2_small` is accepted and routed to the DA pipeline path.
+
+    Mocks the pipeline loader so the suite never downloads a model - this only
+    checks the model-selection plumbing and the MiDaS-matching normalisation
+    (raw disparity-like output -> 0..1 with 1 = nearest).
+    """
+    from foldforge.origamize import estimate_depth
+    from foldforge.origamize import depth as depth_mod
+
+    img = _subject_on_noisy_bg()
+    h, w = img.shape[:2]
+    # Fake pipeline: returns raw predicted_depth (larger = nearer), a left->right
+    # ramp, so we can assert orientation is preserved after normalisation.
+    ramp = np.tile(np.linspace(5.0, 50.0, w), (h, 1))
+
+    class _FakePipe:
+        def __call__(self, pil_image):
+            return {"predicted_depth": ramp}
+
+    monkeypatch.setattr(depth_mod, "_load_depth_anything", lambda mt: _FakePipe())
+
+    d = estimate_depth(img, model_type="depth_anything_v2_small")
+    assert d.shape == (h, w)                          # per-pixel, same H x W
+    assert 0.0 <= d.min() and d.max() <= 1.0          # normalised 0..1
+    assert d[:, -1].mean() > d[:, 0].mean()           # larger raw = nearer (1)
+
+
 @pytest.mark.skipif(not _dpt_available(),
                     reason="DPT_Hybrid needs timm + the dpt_hybrid_384.pt checkpoint")
 def test_dpt_hybrid_depth_shape_and_range():

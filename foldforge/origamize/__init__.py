@@ -8,7 +8,7 @@ The capstone feature - turn a shape into the pleated sheet that folds into it.
 from foldforge.origamize.surface import (
     origamize_profile, origamize_heightfield, OrigamiResult,
     profile_dome, profile_ridge, heightfield_dome, heightfield_saddle, heightfield_ripple,
-    close_relief,
+    close_relief, crease_stats, budget_folds, difficulty_label,
 )
 from foldforge.origamize.io import (
     origamize_image, origamize_function, origamize_points, fold_heightfield,

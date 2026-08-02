@@ -96,13 +96,24 @@ watertight solid in one step.)
 rounded balloon. Monocular *depth* mode instead predicts genuine per-pixel
 distance with a depth network, masks it to the subject with the same GrabCut
 segmentation, and folds that. MiDaS small is the default (needs only PyTorch);
-DPT_Hybrid is a sharper opt-in (it needs `timm`).
+DPT_Hybrid is a sharper opt-in (it needs `timm`); Depth Anything V2 is a third
+backend (`depth_anything_v2_small` / `_base`, via `transformers`) that is often
+sharper than MiDaS on fine detail.
 
 ```python
 from foldforge.origamize import origamize_depth
 result, relief = origamize_depth("zebra.jpg")                          # MiDaS_small
 result, relief = origamize_depth("zebra.jpg", model_type="DPT_Hybrid") # sharper edges
+result, relief = origamize_depth("zebra.jpg", model_type="depth_anything_v2_small")
 ```
+
+**Depth Anything V2** (`--depth-model depth_anything_v2_small`, needs
+`transformers`) is often sharper than MiDaS small on fine detail. Its output is
+normalised into the same 0..1 (1 = nearest) convention as MiDaS, so reliefs are
+never inverted. On the sample photos it folds to a lower error on 4 of 5 shared
+subjects and resolves depth edges ~30% sharper on average — see
+[`examples/output/depth_bench.md`](examples/output/depth_bench.md), reproducible
+with `python examples/bench_depth.py`.
 
 On a zebra photo, silhouette inflation folds to error 0.148 (it's now a rounded
 *spherical-cap* balloon, which reproduces a disc's analytic hemisphere ~14x more
@@ -154,6 +165,47 @@ measure it: silhouette mode *inflates* a mask, and depth mode folds a monocular
 *prediction* of relief, not ground-truth geometry. The interactive studio
 (`studio/index.html`) lets you fold the dome, saddle, ridge, and Miura and watch
 each land on its target.
+
+### Fold it by hand: the crease budget
+
+By default a photo relief can carry hundreds of creases — a fold pattern only a
+machine would reproduce. A **fold budget** coarsens it to something a person can
+actually fold:
+
+```python
+result, relief = origamize_silhouette("swallowtail.jpg", foldable="easy")
+print(result.crease_count, result.difficulty)     # e.g. 12 Easy
+```
+
+```bash
+foldforge fold swallowtail.jpg out.stl --foldable easy   # prints "12 folds, Easy"
+foldforge origamize swallowtail.jpg hand.fold --foldable easy
+foldforge export hand.fold hand.svg --outline            # clean printable sheet
+foldforge instructions hand.fold steps.svg               # numbered step-by-step sheet
+```
+
+`foldforge instructions <pattern.fold or photo> out.svg` writes a one-page,
+printable folding guide: a title, a mountain/valley legend, an overview of the
+full crease pattern, then one numbered panel per fold showing the flat sheet with
+the creases folded so far highlighted (mountain = solid red, valley = dashed
+blue) and a caption ("Valley-fold crease 3"). The distinct M/V fold lines are
+folded in a deterministic left-to-right / bottom-to-top sweep — the natural order
+a corrugation's parallel pleats fold in — so an Easy pattern comes out as about a
+dozen clear steps. A photo input is first turned into a hand-foldable pattern
+(`--foldable`, default `easy`) so the guide stays short.
+
+`foldable` is `easy` / `medium` / `hard` (`hard` keeps the current detail); it
+just drives the existing `folds` coarseness knob to a small target. Every result
+now reports `crease_count` (distinct mountain/valley fold lines, collinear pleats
+merged) and a `difficulty` label (Easy ≤ 24, Medium ≤ 60, else Hard/machine),
+and the studio's detail selector is labelled the same way with a live fold count
+in the status bar. `export --outline` prints a clean hand-fold sheet: the paper
+outline plus the coloured M/V creases, without the internal panel grid.
+
+**Honest note:** this is still the coarse relief / corrugation above, just with
+fewer folds — an accordion-like pleated sheet, **not** figurative origami. An
+"Easy" swallowtail folds into a low pleated relief of the wing shape; it will
+*not* fold into a crane. The budget controls fold *count*, not fold *cleverness*.
 
 ---
 
@@ -343,7 +395,11 @@ foldforge fold cat.jpg cat.stl --style origami     # low-poly folded-paper facet
   straight creases, a low-poly folded-paper look).
 
 Add `--depth` for monocular-depth relief or `--open-sheet` for the one-sided
-sheet. It prints a short summary:
+sheet. By default the exported solid is trimmed to the subject silhouette (a thin
+rim at the outline); pass **`--rect-sheet`** to instead keep the **full
+rectangular sheet** — flat background paper at the baseline with the subject
+relief rising within it, like a real folded square — while staying watertight.
+It prints a short summary:
 
 ```
 Folded cat.jpg -> cat.stl  (silhouette, smooth style, folds=40)
@@ -386,6 +442,7 @@ foldforge check  examples/miura.fold              # report foldability
 foldforge render examples/miura.fold out.png      # render to an image
 foldforge origamize zebra.jpg zebra.fold --depth  # fold a photo (--silhouette / --depth)
 foldforge export zebra.fold zebra.svg             # layered SVG/DXF for a cutter
+foldforge instructions zebra.fold steps.svg       # numbered step-by-step fold sheet
 ```
 
 ## Run the demos

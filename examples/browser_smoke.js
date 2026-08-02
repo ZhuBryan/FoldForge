@@ -20,6 +20,7 @@ const fs = require('fs');
   const shotGallery = path.join(__dirname, 'output', 'studio_fix_gallery.png');
   const shotRectFlat = path.join(__dirname, 'output', 'studio_rect_flat.png');
   const shotRectFolded = path.join(__dirname, 'output', 'studio_rect_folded.png');
+  const shotMiura = path.join(__dirname, 'output', 'studio_live_miura.png');
   const setFold = f => page.evaluate(v => { const s = document.getElementById('slider'); s.value = v; s.dispatchEvent(new Event('input')); }, f);
   // panel-1 ("input photo") image source, as the browser resolves it
   const panelSrc = async () => page.evaluate(() => {
@@ -69,10 +70,14 @@ const fs = require('fs');
   if (!uploadSrc) await fail('panel 1 input-photo src empty after upload');
   await page.screenshot({path: shotUpload});
 
-  // ---- rough-detail rebuild still works ----
+  // ---- hand-fold budget: selecting "Easy" drops the fold count and the status
+  //      reports the difficulty label (Easy) ----
+  const beforeEasy = (await status()).match(/(\d+) folds/);
   await page.select('#detail', '10');
   await new Promise(r => setTimeout(r, 1800));
-  if (!/9 folds/.test(await status())) await fail('rough detail rebuild failed');
+  const easyStatus = await status();
+  if (!/9 folds \(Easy\)/.test(easyStatus)) await fail('Easy budget did not report "9 folds (Easy)"');
+  if (beforeEasy && !(9 < parseInt(beforeEasy[1]))) await fail('Easy budget did not drop the fold count');
 
   // ---- showcase gallery: cards present + load a baked sample ----
   await page.click('#galleryBtn');
@@ -126,8 +131,31 @@ const fs = require('fs');
   await new Promise(r => setTimeout(r, 1200));
   await page.screenshot({path: shot});
 
+  // ---- live 2-D Miura engine: re-upload, switch engine, run the in-browser fit ----
+  await page.select('#detail', '24');
+  const inputM = await page.$('#imgfile');
+  await inputM.uploadFile(img);
+  await new Promise(r => setTimeout(r, 2500));
+  await page.select('#enginemode', 'miura');
+  await new Promise(r => setTimeout(r, 4000));
+  const miStatus = await status();
+  const mi = miStatus.match(/live 2-D Miura fit on a (\d+)×(\d+) grid: (\d+) iterations, fidelity error ([0-9.]+), (\d+) ms/);
+  if (!mi) await fail('2-D Miura engine did not report the live fit readout: ' + miStatus);
+  // mesh actually updated: folded vertices carry real z relief at fold=1
+  await setFold(1);
+  await new Promise(r => setTimeout(r, 600));
+  const meshOk = await page.evaluate(() => {
+    const p = geo.attributes.position.array; let zmin = 1e9, zmax = -1e9;
+    for (let k = 2; k < p.length; k += 3) { if (p[k] < zmin) zmin = p[k]; if (p[k] > zmax) zmax = p[k]; }
+    return (zmax - zmin);
+  });
+  if (!(meshOk > 0.05)) await fail('2-D Miura mesh has no folded relief (z range ' + meshOk + ')');
+  await page.screenshot({path: shotMiura});
+  const miGrid = mi[1] + '×' + mi[2], miIters = mi[3], miErr = mi[4], miMs = mi[5];
+
   if (errs.length) await fail('uncaught page errors');
   console.log('OK — studio folds', path.basename(img),
+    '| 2-D Miura live fit', miGrid, 'grid,', miIters, 'iters, error', miErr, ',', miMs + 'ms, z-relief', meshOk.toFixed(2),
     '| live mirror-IoU', mirror, applied ? '(symmetrized)' : '(left as-is)',
     '| baked butterfly_sym IoU', gsym.iou, '| gallery cards', cards,
     '| pipeline sym-stage', pipe.sym,

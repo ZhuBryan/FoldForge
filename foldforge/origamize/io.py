@@ -142,12 +142,22 @@ def heightmap_from_points(points, grid=(18, 24)) -> np.ndarray:
 
 
 def origamize_image(source, grid=(18, 24), height=6.0, length=24.0, width=20.0,
-                    invert=False, iters=500, engine="corrugation") -> OrigamiResult:
+                    invert=False, iters=500, engine="corrugation",
+                    foldable=None) -> OrigamiResult:
     """Estimate a relief from an image and decompose it into a foldable sheet.
 
     ``engine="miura2d"`` fits a true 2D Miura tessellation instead of the 1D
     corrugation (default); see :func:`fold_heightfield`.
+
+    ``foldable`` is the hand-fold budget preset (``"easy"``/``"medium"``/
+    ``"hard"``); when given it caps the grid resolution so the crease pattern is
+    foldable by hand (tens of creases). The result carries ``crease_count`` and
+    ``difficulty``. Still a coarse relief/corrugation, not figurative origami.
     """
+    from foldforge.origamize.surface import budget_folds
+    f = budget_folds(foldable, None)
+    if f is not None:                                # cap the grid to the budget
+        grid = (max(3, round(f * grid[0] / grid[1])), int(f))
     Z = heightmap_from_image(source, grid, invert) * height
     return fold_heightfield(Z, length, width, engine=engine, iters=iters)
 
