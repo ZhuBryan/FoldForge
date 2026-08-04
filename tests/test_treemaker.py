@@ -1,8 +1,11 @@
 """Tests for the TreeMaker-lite figurative design path.
 
 Covers the packing (non-overlap, determinism, on-paper), the FOLD export round
-trip, and flat-foldability of the flagship 3-flap tree (Kawasaki + Maekawa at
-its single interior vertex, the molecule incentre).
+trip, and flat-foldability of the trees that fully fold flat - the 3-flap
+triangle *and* the 4-flap tangential quad, each of which now has a single
+interior vertex (the incircle-molecule incentre) passing Kawasaki + Maekawa with
+exact flap lengths. The 5-flap pentagon and the river tree are exercised as
+honest *partial* bases (see the module docstring).
 """
 
 import numpy as np
@@ -14,6 +17,15 @@ from foldforge.design import (
 )
 from foldforge.geometry.fold_io import write_fold, read_fold
 from foldforge.geometry.foldability import foldability_report
+
+
+def _fully_folds(name, flap_tol=0.02):
+    """True iff every interior vertex passes both theorems and flaps are exact."""
+    packing, pattern = design_base(get_tree(name))
+    report = foldability_report(pattern)
+    err = flap_length_errors(packing, pattern)
+    passes = all(v.kawasaki and v.maekawa for v in report.vertices)
+    return passes and err.max() < flap_tol, report, err
 
 
 def test_packing_non_overlap_and_on_paper():
@@ -54,22 +66,35 @@ def test_three_flap_is_flat_foldable():
         assert v.maekawa is True
 
 
-def test_three_flap_flap_lengths_match_tree():
-    """Tangent packing -> folded flap lengths equal the tree edges (~0 error)."""
-    packing, pattern = design_base(get_tree("three-flap"))
-    err = flap_length_errors(packing, pattern)
-    assert err.max() < 1e-3
+def test_four_flap_is_flat_foldable():
+    """The 4-flap tangential quad folds flat end to end: one incircle molecule.
+
+    This is the multi-flap case the old per-triangle assembly could not fold.
+    """
+    packing, pattern = design_base(get_tree("four-flap"))
+    report = foldability_report(pattern)
+    assert len(report.vertices) == 1              # single incentre, rest on border
+    assert report.flat_foldable
+    for v in report.vertices:
+        assert v.kawasaki is True
+        assert v.maekawa is True
 
 
-def test_every_incentre_passes_kawasaki():
-    """Kawasaki holds at every molecule incentre for all built-in trees."""
-    for name in BUILTIN_TREES:
-        packing, pattern = design_base(get_tree(name))
-        report = foldability_report(pattern)
-        # The incentres are the degree-6 interior vertices; each must pass.
-        deg6 = [v.vertex for v in report.vertices
-                if len(pattern.incident_edges(v.vertex)) == 6]
-        assert deg6, f"{name}: expected at least one incentre"
-        for v in report.vertices:
-            if v.vertex in deg6:
-                assert v.kawasaki is True, f"{name}: incentre {v.vertex} fails Kawasaki"
+@pytest.mark.parametrize("name", ["three-flap", "four-flap"])
+def test_working_trees_fold_flat_with_exact_flaps(name):
+    """The trees we claim work pass both theorems everywhere; flaps are exact."""
+    ok, report, err = _fully_folds(name)
+    assert ok, f"{name}: not fully flat-foldable"
+    assert err.max() < 1e-3, f"{name}: flap error {err.max():.4f}"
+
+
+@pytest.mark.parametrize("name", ["five-flap", "river-four"])
+def test_partial_trees_are_honestly_partial(name):
+    """Documented limits: the pentagon and the river tree do NOT fully fold.
+
+    They still pack and export; this pins the honest ceiling so a regression that
+    silently 'fixed' them (or broke the packing) would fail loudly.
+    """
+    ok, report, err = _fully_folds(name)
+    assert not ok, f"{name}: unexpectedly fully foldable - update the docs/claims"
+    assert len(report.vertices) > 0                 # it still builds a real pattern

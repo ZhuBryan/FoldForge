@@ -9,3 +9,6 @@ dist/
 torch_wheels/
 examples/_animals_baked.json
 examples/output/_*.png
+node_modules/
+package-lock.json
+package.json

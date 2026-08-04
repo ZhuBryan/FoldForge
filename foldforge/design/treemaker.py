@@ -20,23 +20,44 @@ subset of each:
     exactly what makes the molecule flap lengths come out right (below).
     Circles only: no rivers, gussets or sub-trees.
 
-3.  **Rabbit-ear molecules**  -- Delaunay-triangulate the packed centres and fill
-    each triangle with the universal *rabbit-ear* molecule: the incentre, the
-    three angle bisectors (corner -> incentre) and the three perpendiculars
-    (incentre -> the foot on each edge). Kawasaki holds *exactly* at every
-    incentre (the six wedges are ``90 - alpha/2`` etc.; both alternating sums are
-    180), and for a tangent packing the tangent length from a corner equals its
-    disc radius = ``scale * flap_length``, so the folded flap matches the tree.
+3.  **Incircle universal molecule**  -- fill the packed base with a single
+    *tangential-polygon* molecule instead of gluing independent Delaunay
+    triangles. Take the convex hull of the packed centres; because every hull
+    edge joins a tangent disc pair its length is ``r_i + r_j``, so by Pitot's
+    theorem a triangle or a quadrilateral hull is always a *tangential* polygon:
+    it has one inscribed circle that touches all sides. The molecule is then the
+    incentre, one angle bisector per corner (corner -> incentre, a ridge) and one
+    perpendicular per side (incentre -> the incircle touch point, a hinge). The
+    touch point on side ``(i, j)`` sits at distance ``r_i`` from corner ``i`` -
+    exactly the disc-disc tangent point - so the folded flap length equals the
+    tree edge with ~0 error, and Kawasaki holds exactly at the incentre (opposite
+    wedges are ``90 - alpha_i/2`` complementary; both alternating sums are 180).
 
-Honest scope: the molecule assembly is flat-foldable at the incentres always,
-and end-to-end (every interior vertex passes) for a **single-triangle** tree -
-the classic 3-flap "rabbit ear" base. Trees with more leaves pack and export
-fine and every incentre still passes, but the *shared* triangle edges introduce
-degree-4 tangency vertices that a proper river/gusset would resolve; some of
-those can fail the necessary checks. See ``design_base`` and the tests.
+    A tangential polygon has the *whole* base in one molecule with a single
+    interior vertex (the incentre) - no shared-edge feet to reconcile - so it
+    folds flat end to end. This is the well-defined case the construction can
+    guarantee: it covers the 3-flap triangle **and every 4-flap quad**.
+
+Honest scope (see ``crease_pattern`` and the tests):
+
+    * ``three-flap`` (triangle) and ``four-flap`` (tangential quad) fold flat end
+      to end: the single incentre passes Kawasaki *and* Maekawa and every flap
+      length is exact.
+    * ``five-flap`` (a pentagon) is generally **not** tangential - for n >= 5 a
+      tangent-disc hull need not admit an inscribed circle - so it falls back to
+      the old per-triangle rabbit-ear assembly. Its incentres still pass Kawasaki
+      but the non-tangent shared diagonal is unresolved: it is a *partial* base,
+      reported as such, and would need the full universal molecule (gusset ridges
+      on the non-tangential polygon), which is not implemented.
+    * **Rivers** (trees with an internal spine edge) are a documented TODO. The
+      circle method packs them (path lengths carry the spine), but two leaves on
+      the same sub-hub have discs whose radii include the spine while their
+      separation does not, so the discs overlap by the river width; resolving
+      that needs sub-tree molecule decomposition, which is out of scope here.
+      ``river_tree`` builds such a tree so the limitation is testable, not faked.
 
     from foldforge.design.treemaker import get_tree, design_base
-    packing, pattern = design_base(get_tree("three-flap"))
+    packing, pattern = design_base(get_tree("four-flap"))
 """
 
 from __future__ import annotations
@@ -45,7 +66,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 from scipy.optimize import minimize
-from scipy.spatial import Delaunay
+from scipy.spatial import ConvexHull, Delaunay
 
 from foldforge.geometry.crease_graph import CreasePattern
 
@@ -104,15 +125,39 @@ def star_tree(lengths: list[float], name: str = "star") -> MetricTree:
     return MetricTree(edges=edges, root=0, name=name)
 
 
-# Built-in trees. Star topology (one hub) -> the circle method is exact.
+def river_tree(spine: float, left: list[float], right: list[float],
+               name: str = "river") -> MetricTree:
+    """A two-hub tree with an internal *spine* edge (the thing rivers model).
+
+    Node 0 and node 1 are hubs joined by an edge of length ``spine``; ``left``
+    hangs off hub 0 and ``right`` off hub 1. Leaves on opposite hubs are
+    separated by the spine, which the packing honours - but see the module
+    docstring: the molecule side of rivers is a documented TODO, so a river tree
+    packs and exports yet does not (yet) fold flat.
+    """
+    edges = [(0, 1, spine)]
+    nid = 2
+    for L in left:
+        edges.append((0, nid, L)); nid += 1
+    for L in right:
+        edges.append((1, nid, L)); nid += 1
+    return MetricTree(edges=edges, root=0, name=name)
+
+
 BUILTIN_TREES = {
-    # Three equal flaps -> a single Delaunay triangle -> the clean rabbit-ear
-    # base that folds flat end to end. This is the flagship working example.
+    # Three equal flaps -> a triangle -> the clean rabbit-ear base. Folds flat
+    # end to end (single incentre passes both theorems, flap error ~0).
     "three-flap": star_tree([1.0, 1.0, 1.0], "three-flap"),
-    # A four-limb figure (bird-base-like silhouette): two long flaps, two short.
+    # A four-limb figure -> a tangential quad -> one incircle molecule. Also
+    # folds flat end to end: this is the flagship *multi*-flap working example.
     "four-flap": star_tree([1.0, 1.0, 0.6, 0.6], "four-flap"),
-    # A five-limb figure (head, two arms, two legs) with a longer "head".
+    # A five-limb figure -> a pentagon, generally NOT tangential, so it falls
+    # back to the per-triangle assembly: a PARTIAL base (see the module docstring).
     "five-flap": star_tree([1.2, 0.9, 0.9, 0.8, 0.8], "five-flap"),
+    # A tree with an internal spine edge (two leaves off each end). Packs with a
+    # river between the sub-hubs; the molecule side is a documented TODO, so this
+    # is here to make the river limitation testable, not to claim it folds.
+    "river-four": river_tree(0.5, [1.0, 1.0], [1.0, 1.0], "river-four"),
 }
 
 
@@ -225,13 +270,110 @@ class _VertexBag:
         return idx
 
 
+def _incircle(poly: np.ndarray) -> tuple[np.ndarray, float, float]:
+    """Inscribed-circle centre and radius of a convex polygon (CCW ``poly``).
+
+    Solves, in a least-squares sense, ``n_e . x + rho = c_e`` for every edge
+    (``n_e`` the outward unit normal, ``c_e = n_e . a``). For a *tangential*
+    polygon the residual is ~0 and the perpendicular foot on each side is that
+    side's incircle touch point. Returns ``(centre, rho, max_residual)`` - the
+    residual being how far from equidistant the best circle is (0 <=> tangential).
+    """
+    m = len(poly)
+    A = np.empty((m, 3))
+    b = np.empty(m)
+    for i in range(m):
+        p0, p1 = poly[i], poly[(i + 1) % m]
+        d = p1 - p0
+        d = d / np.linalg.norm(d)
+        nrm = np.array([d[1], -d[0]])          # outward normal for a CCW polygon
+        A[i] = (nrm[0], nrm[1], 1.0)
+        b[i] = nrm.dot(p0)
+    sol, *_ = np.linalg.lstsq(A, b, rcond=None)
+    centre, rho = sol[:2], float(sol[2])
+    resid = float(np.max(np.abs(A @ sol - b)))
+    return centre, rho, resid
+
+
+def _is_tangential(poly: np.ndarray, tol: float = 1e-6) -> bool:
+    """True if ``poly`` admits one inscribed circle touching every side."""
+    _, _, resid = _incircle(poly)
+    return resid < tol
+
+
+def _incircle_pattern(packing: Packing, hidx: list[int],
+                      poly: np.ndarray) -> CreasePattern:
+    """Single tangential-polygon molecule: one incentre, one interior vertex.
+
+    ``hidx`` are the row indices of the hull corners (CCW); ``poly`` their
+    coordinates. Sides (split at their incircle touch point) are the molecule
+    border ``B``; the ``m`` corner bisectors are ridges and the ``m``
+    perpendicular hinges reach the touch points. Maekawa is satisfied at the
+    incentre by making the bisectors mountains and the hinges valleys, then
+    flipping one hinge so ``|M - V| = 2``.
+    """
+    pts = packing.centers
+    m = len(poly)
+    ic, _, _ = _incircle(poly)
+
+    bag = _VertexBag()
+    corner_idx = [bag.add(p) for p in pts]     # leaf centres first
+    ic_i = bag.add(ic)
+    feet_i = []
+    edges: list[tuple[int, int]] = []
+    assign: list[str] = []
+
+    for k in range(m):
+        a, b = poly[k], poly[(k + 1) % m]
+        foot = _foot(ic, a, b)
+        fi = bag.add(foot)
+        feet_i.append(fi)
+        ca = corner_idx[hidx[k]]
+        cb = corner_idx[hidx[(k + 1) % m]]
+        edges.append((ca, fi)); assign.append("B")     # hull side, split at touch
+        edges.append((fi, cb)); assign.append("B")
+    for k in range(m):                                  # ridges: corner -> incentre
+        edges.append((ic_i, corner_idx[hidx[k]])); assign.append("M")
+    for k in range(m):                                  # hinges: incentre -> touch
+        edges.append((ic_i, feet_i[k])); assign.append("V")
+    # incentre currently has m mountains + m valleys (|M-V| = 0). Flip one hinge
+    # to a mountain so the incentre satisfies Maekawa: m+1 mountains, m-1 valleys.
+    assign[-1] = "M"
+
+    verts = np.array(bag.coords)
+    return CreasePattern(
+        vertices=verts,
+        edges=np.array(edges, dtype=int),
+        assignment=assign,
+        metadata={"name": f"treemaker:{packing.tree.name}"},
+    )
+
+
 def crease_pattern(packing: Packing) -> CreasePattern:
-    """Assemble a rabbit-ear molecule per Delaunay triangle into one pattern.
+    """Build the crease pattern for a packed base.
+
+    If the convex hull of the packed centres is a *tangential* polygon (always
+    true for a 3- or 4-leaf star base - see the module docstring), fill it with a
+    single incircle molecule that folds flat end to end. Otherwise fall back to
+    the older per-Delaunay-triangle rabbit-ear assembly, which is exact at each
+    incentre but leaves non-tangent shared diagonals unresolved (a partial base).
+    """
+    pts = packing.centers
+    hull = ConvexHull(pts)
+    hidx = [int(i) for i in hull.vertices]     # CCW hull corners (row indices)
+    poly = pts[hidx]
+    if len(hidx) == len(pts) and _is_tangential(poly):
+        return _incircle_pattern(packing, hidx, poly)
+    return _rabbit_ear_pattern(packing)
+
+
+def _rabbit_ear_pattern(packing: Packing) -> CreasePattern:
+    """Fallback: a rabbit-ear molecule per Delaunay triangle glued into one map.
 
     Vertices: the packed leaf centres, plus each triangle's incentre and the
-    perpendicular feet on its edges. Creases: three bisectors (corner->incentre)
-    and three perpendiculars (incentre->foot) per triangle, plus the triangle
-    edges (split at the feet) as hinges/border. Kawasaki holds at every incentre.
+    perpendicular feet on its edges. Kawasaki holds at every incentre, but at a
+    *non-tangent* shared triangle edge the two incentres' feet do not coincide,
+    so those interior vertices can fail the checks - an honest partial base.
     """
     pts = packing.centers
     tri = Delaunay(pts)
@@ -309,10 +451,27 @@ def flap_length_errors(packing: Packing, pattern: CreasePattern) -> np.ndarray:
     """Relative error between each folded flap length and its tree target.
 
     The folded flap length of a leaf is the tangent length from its corner - the
-    distance from the centre to the foot on an incident triangle edge - which we
-    read straight back off the assembled geometry.
+    distance from the centre to the foot on an incident edge - read straight back
+    off the assembled geometry, matching whichever molecule ``crease_pattern``
+    used (incircle for a tangential hull, per-triangle otherwise).
     """
     pts = packing.centers
+    hull = ConvexHull(pts)
+    hidx = [int(i) for i in hull.vertices]
+    poly = pts[hidx]
+    if len(hidx) == len(pts) and _is_tangential(poly):
+        ic, _, _ = _incircle(poly)
+        measured = np.full(len(packing.leaves), np.nan)
+        m = len(poly)
+        for k in range(m):
+            foot = _foot(ic, poly[k], poly[(k + 1) % m])
+            for local in (k, (k + 1) % m):
+                gi = hidx[local]
+                tan = np.linalg.norm(poly[local] - foot)
+                measured[gi] = tan if np.isnan(measured[gi]) else min(measured[gi], tan)
+        target = packing.flap_targets
+        return np.abs(measured - target) / np.maximum(target, 1e-9)
+
     tri = Delaunay(pts)
     measured = np.full(len(packing.leaves), np.nan)
     for t in tri.simplices:

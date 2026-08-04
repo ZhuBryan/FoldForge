@@ -21,6 +21,8 @@ const fs = require('fs');
   const shotRectFlat = path.join(__dirname, 'output', 'studio_rect_flat.png');
   const shotRectFolded = path.join(__dirname, 'output', 'studio_rect_folded.png');
   const shotMiura = path.join(__dirname, 'output', 'studio_live_miura.png');
+  const shotEasy = path.join(__dirname, 'output', 'studio_difficulty_easy.png');
+  const shotDetailed = path.join(__dirname, 'output', 'studio_difficulty_detailed.png');
   const setFold = f => page.evaluate(v => { const s = document.getElementById('slider'); s.value = v; s.dispatchEvent(new Event('input')); }, f);
   // panel-1 ("input photo") image source, as the browser resolves it
   const panelSrc = async () => page.evaluate(() => {
@@ -76,7 +78,7 @@ const fs = require('fs');
   await page.select('#detail', '10');
   await new Promise(r => setTimeout(r, 1800));
   const easyStatus = await status();
-  if (!/9 folds \(Easy\)/.test(easyStatus)) await fail('Easy budget did not report "9 folds (Easy)"');
+  if (!/Easy\b.*\b9 folds/.test(easyStatus)) await fail('Easy budget did not report "Easy — 9 folds"');
   if (beforeEasy && !(9 < parseInt(beforeEasy[1]))) await fail('Easy budget did not drop the fold count');
 
   // ---- showcase gallery: cards present + load a baked sample ----
@@ -131,6 +133,31 @@ const fs = require('fs');
   await new Promise(r => setTimeout(r, 1200));
   await page.screenshot({path: shot});
 
+  // ---- DETAIL selector on a BAKED sample must re-fold it (the reported bug: the
+  //      selector did nothing for gallery samples). Load the butterfly bake, switch
+  //      Detailed -> Easy, and assert BOTH the fold count drops AND the mesh geometry
+  //      (vertex/triangle count) actually changes. ----
+  await page.evaluate(() => { if (typeof loadBaked === 'function') loadBaked('butterfly'); });
+  await new Promise(r => setTimeout(r, 700));
+  await page.select('#foldmode', 'all');
+  await page.select('#detail', '24');                         // Detailed
+  await new Promise(r => setTimeout(r, 1600));
+  const detStatus = await status();
+  const detGeom = await page.evaluate(() => ({ verts: geo.attributes.position.count, tris: geo.index.count / 3, nx: S.nx, ny: S.ny }));
+  const detFolds = parseInt((detStatus.match(/(\d+) folds/) || [])[1]);
+  await setFold(1); await new Promise(r => setTimeout(r, 500));
+  await page.screenshot({path: shotDetailed});
+  await page.select('#detail', '10');                         // Easy
+  await new Promise(r => setTimeout(r, 1600));
+  const easyStatus2 = await status();
+  const easyGeom = await page.evaluate(() => ({ verts: geo.attributes.position.count, tris: geo.index.count / 3, nx: S.nx, ny: S.ny }));
+  const easyFolds = parseInt((easyStatus2.match(/(\d+) folds/) || [])[1]);
+  await setFold(1); await new Promise(r => setTimeout(r, 500));
+  await page.screenshot({path: shotEasy});
+  if (!/Easy\b.*\b9 folds/.test(easyStatus2)) await fail('baked-sample Easy did not report "Easy — 9 folds": ' + easyStatus2);
+  if (!(easyFolds < detFolds)) await fail('baked-sample Detail did not drop fold count: Easy ' + easyFolds + ' vs Detailed ' + detFolds);
+  if (!(easyGeom.verts < detGeom.verts)) await fail('baked-sample Detail did not change mesh vertices: Easy ' + easyGeom.verts + ' vs Detailed ' + detGeom.verts);
+
   // ---- live 2-D Miura engine: re-upload, switch engine, run the in-browser fit ----
   await page.select('#detail', '24');
   const inputM = await page.$('#imgfile');
@@ -161,6 +188,8 @@ const fs = require('fs');
     '| pipeline sym-stage', pipe.sym,
     '| panel1 upload src', uploadSrc.slice(0, 24) + '…', '| panel1 gallery src', gallerySrc.slice(0, 24) + '…',
     '| flat-sheet rag L/R', rect.leftRag.toFixed(3) + '/' + rect.rightRag.toFixed(3), '(ragged flat OK)',
-    '| screenshots', shot, shotUpload, shotGallery, shotRectFlat, shotRectFolded, '|', await status());
+    '| baked-sample Detail: Detailed', detFolds, 'folds/' + detGeom.verts + 'v/' + detGeom.tris + 't ->',
+    'Easy', easyFolds, 'folds/' + easyGeom.verts + 'v/' + easyGeom.tris + 't',
+    '| screenshots', shot, shotUpload, shotGallery, shotRectFlat, shotRectFolded, shotDetailed, shotEasy, '|', await status());
   await browser.close();
 })().catch(e => { console.error('FAIL:', e.message); process.exit(1); });

@@ -73,6 +73,16 @@ def write_fold(pattern: CreasePattern, path: str | Path) -> None:
     data = dict(pattern.metadata)
     data.setdefault("file_spec", 1.1)
     data.setdefault("file_creator", "FoldForge")
+    # Advertise the frame's class/attributes so importers (Origami Simulator,
+    # flat-folder) know whether this is a flat 2D crease pattern or a folded 3D
+    # form. Keyed off the coordinate dimension; only defaults, so a file that
+    # already carries these round-trips unchanged.
+    if pattern.vertices.shape[1] == 2:
+        data.setdefault("frame_classes", ["creasePattern"])
+        data.setdefault("frame_attributes", ["2D"])
+    else:
+        data.setdefault("frame_classes", ["foldedForm"])
+        data.setdefault("frame_attributes", ["3D"])
     data["vertices_coords"] = pattern.vertices.tolist()
     data["edges_vertices"] = pattern.edges.tolist()
     data["edges_assignment"] = list(pattern.assignment)

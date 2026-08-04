@@ -433,6 +433,18 @@ from foldforge import read_fold
 pattern = read_fold("examples/miura.fold")
 ```
 
+### Interoperability
+
+FoldForge writes the standard [FOLD file format](https://github.com/edemaine/fold)
+(`file_spec` 1.1, with `frame_classes`/`frame_attributes`, `vertices_coords`,
+`edges_vertices`, `edges_assignment` using the spec's `M`/`V`/`B`/`F`/`U`
+letters, and optional `edges_foldAngle`/`faces_vertices`). A crease pattern
+exports as a flat 2D FOLD file, so it interoperates with the wider origami
+toolchain: open it in [Origami Simulator](https://origamisimulator.org) via
+**File > Import**, or analyze it in Jason Ku's flat-folder. See
+`examples/output/interop_example.fold` for a schema-valid sample (the TreeMaker-lite
+three-flap base). Conformance is guarded by `tests/test_fold_conformance.py`.
+
 ## Command line
 
 ```bash

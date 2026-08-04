@@ -19,6 +19,7 @@ from foldforge.design.inverse import (
 from foldforge.design.treemaker import (
     MetricTree,
     star_tree,
+    river_tree,
     get_tree,
     BUILTIN_TREES,
     Packing,
@@ -40,6 +41,7 @@ __all__ = [
     "target_step",
     "MetricTree",
     "star_tree",
+    "river_tree",
     "get_tree",
     "BUILTIN_TREES",
     "Packing",

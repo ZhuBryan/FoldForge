@@ -705,7 +705,12 @@ let playing=true,t=0,dir=1,stepMode=false,lastImg=null,lastImgUrl=null,detailNx=
 const slider=document.getElementById('slider'),pct=document.getElementById('pct'),play=document.getElementById('play'),sel=document.getElementById('shape');
 const detail=document.getElementById('detail'),foldmode=document.getElementById('foldmode');
 foldmode.addEventListener('change',()=>{stepMode=(foldmode.value==='step');});
-detail.addEventListener('change',()=>{detailNx=parseInt(detail.value)||24; rebuildImage();});
+detail.addEventListener('change',()=>{detailNx=parseInt(detail.value)||24;
+  const cur=DATA.shapes[sel.value];
+  if(sel.value==='__up'&&lastImg) rebuildImage();                 // uploaded photo: full re-segment/fold
+  else if(cur&&cur.mode==='subject'&&cur.seg) refoldSubject(sel.value); // baked/loaded sample: re-fold its height field
+  else if(lastImg) rebuildImage();
+  else setStatus('Detail sets the crease budget for folded photos and samples — load a sample or upload a photo; “'+((cur&&cur.label)||sel.value)+'” is a fixed pattern.',''); });
 const shapemode=document.getElementById('shapemode');
 shapemode.addEventListener('change',()=>{shapeMode=shapemode.value; rebuildImage();});
 const heatBtn=document.getElementById('heatBtn'),pipeline=document.getElementById('pipeline'),
@@ -800,7 +805,28 @@ function rebuildImage(){ if(!lastImg)return;
   const folds=nx-1;
   if(shape.fitInfo){const fi=shape.fitInfo;
     setStatus('Folded '+nm+' — live 2-D Miura fit on a '+fi.R+'×'+fi.C+' grid: '+fi.iters+' iterations, fidelity error '+fi.error.toFixed(3)+', '+Math.round(fi.runtime)+' ms. Coarse live fit — the offline Python engine is higher quality.'+smsg,'ok');}
-  else setStatus('Folded '+nm+' — '+info+', '+iw+'×'+ih+', '+folds+' folds ('+diffLabel(folds)+')'+smsg,'ok');
+  else setStatus('Folded '+nm+' — '+info+', '+iw+'×'+ih+', '+presetLabel()+' — '+folds+' folds'+smsg,'ok');
+}
+// Detail change on a baked/loaded subject sample (no live upload behind it): re-fold
+// its stored height field (seg blob) at the new crease budget, through the very same
+// buildImageShape/buildMiuraShape path uploads use — so Easy/Detailed visibly change
+// the mesh geometry and the fold-count readout. The baked photo texture is reused.
+function refoldSubject(name){
+  const cur=DATA.shapes[name]; if(!cur||!cur.seg) return;
+  const seg=ensureSeg(cur.seg), nx=detailNx;
+  const bw=seg.bbox[2]-seg.bbox[0]+1, bh=seg.bbox[3]-seg.bbox[1]+1;
+  const ny=Math.max(6,Math.round(nx*bh/Math.max(1,bw)));
+  const shape=(engineMode==='miura')?buildMiuraShape(null,nx,ny,'subject',seg):buildImageShape(null,nx,ny,'subject',seg);
+  shape.tex=cur.tex; shape._tex=null;                        // reuse the baked photo texture (realised lazily)
+  shape.seg=seg; shape.segRaw=cur.segRaw||null; shape.sym=cur.sym||null;
+  shape.engine=cur.engine||shape.engine; shape.label=cur.label||shape.label;
+  DATA.shapes[name]=shape;                                    // replace in place, same dropdown/gallery key
+  buildShape(name); t=0;dir=1;playing=true;play.innerHTML='&#10073;&#10073; Pause fold';
+  const folds=nx-1; let smsg='';
+  if(shape.sym&&shape.sym.iou!=null) smsg=' · mirror-IoU '+shape.sym.iou.toFixed(2)+(shape.sym.applied?' (symmetrized)':'');
+  if(shape.fitInfo){const fi=shape.fitInfo;
+    setStatus('Folded '+shape.label+' — live 2-D Miura fit on a '+fi.R+'×'+fi.C+' grid, fidelity error '+fi.error.toFixed(3)+', '+presetLabel()+' — '+folds+' folds'+smsg,'ok');}
+  else setStatus('Folded '+shape.label+' — '+presetLabel()+' — '+folds+' folds'+smsg,'ok');
 }
 DATA.order.forEach(n=>{const o=document.createElement('option');o.value=n;o.textContent=DATA.shapes[n].label||n;sel.appendChild(o);});
 // showcase gallery: one card per baked sample (marked by an `engine` label),
@@ -825,9 +851,11 @@ sel.addEventListener('change',()=>{buildShape(sel.value);t=0;dir=1;playing=true;
 slider.addEventListener('input',()=>{playing=false;play.innerHTML='&#9654; Play fold';t=parseFloat(slider.value);});
 play.addEventListener('click',()=>{playing=!playing;play.innerHTML=playing?'&#10073;&#10073; Pause fold':'&#9654; Play fold';});
 const statusEl=document.getElementById('status');
-// hand-fold difficulty from the crease (fold-line) count — same thresholds as the
-// Python foldforge.origamize.difficulty_label, so the studio and CLI agree.
-function diffLabel(n){ return n<=24?'Easy':(n<=60?'Medium':'Hard, machine'); }
+// The readout names the *selected* preset (Easy/Medium/Detailed/Extra) rather
+// than re-deriving a difficulty band from the raw fold count — the two used to
+// disagree (Detailed's ~23 folds fell in the "Easy" band, reading "23 folds
+// (Easy)"). Pull the preset name straight from the chosen dropdown option.
+function presetLabel(){ const o=detail.options[detail.selectedIndex]; return o?o.text.split(' ')[0]:''; }
 function setStatus(msg,kind){ if(!msg){statusEl.style.display='none';return;} statusEl.textContent=msg; statusEl.className=kind||''; statusEl.style.display='block'; }
 // load an image File -> fold it; a visible status message on both success and failure (undecodable formats no longer fail silently)
 function foldImageFile(file){
