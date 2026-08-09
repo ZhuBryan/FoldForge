@@ -157,16 +157,23 @@ def _fold(args) -> None:
 
 
 def _design(args) -> None:
-    """Design a figurative uniaxial base from a built-in stick-figure tree.
+    """Design a figurative uniaxial base from a stick-figure tree.
 
-    Circle-packs the tree's flaps (TreeMaker-lite), fills the Delaunay
-    triangulation with rabbit-ear molecules, and writes the crease pattern as a
-    layered SVG (M/V colours) plus a matching .fold next to it.
+    Two sources: a built-in tree by name, or ``--from-photo IMG`` which runs the
+    whole photo -> silhouette -> medial-axis stick tree -> base bridge. Either
+    way it circle-packs the tree's flaps (TreeMaker-lite) and writes the crease
+    pattern as a layered SVG (M/V colours) or a matching .fold.
     """
     from foldforge.design import get_tree, design_base, flap_length_errors
     from foldforge.geometry.foldability import foldability_report
     from foldforge.fabricate import to_svg
 
+    if args.from_photo:
+        _design_from_photo(args)
+        return
+
+    if not args.tree:
+        raise SystemExit("give a built-in tree name or --from-photo IMG")
     tree = get_tree(args.tree)
     packing, pattern = design_base(tree)
     if args.out.lower().endswith(".fold"):
@@ -183,6 +190,41 @@ def _design(args) -> None:
     print(f"  max flap error    : {err.max() * 100:.2f}%")
     print(f"  Kawasaki          : {n_kaw}/{n_int} interior vertices pass")
     print(f"  Maekawa           : {n_mae}/{n_int} interior vertices pass")
+
+
+def _design_from_photo(args) -> None:
+    """Run the photo -> stick tree -> uniaxial base bridge and report honestly."""
+    from foldforge.design import design_from_image
+    from foldforge.fabricate import to_svg
+
+    rect = tuple(args.rect) if args.rect else None
+    try:
+        d = design_from_image(args.from_photo, expected_leaves=args.expected,
+                              rect=rect)
+    except FileNotFoundError as exc:
+        raise SystemExit(f"error: {exc}")
+    e = d.extraction
+    print(f"photo -> stick tree: {e.n_leaves} leaves (limbs), "
+          f"{len(e.edge_lengths)} edges")
+    print(f"  extracted tree    : {e.note}")
+    print(f"  edge lengths (norm): {e.edge_lengths}")
+    if e.dropped_cycle_edges:
+        print(f"  note: dropped {e.dropped_cycle_edges} cycle edge(s) "
+              "(silhouette had a hole; spanning tree used)")
+    if d.pattern is None:
+        print(f"  base              : {d.note}")
+        return
+    if args.out.lower().endswith(".fold"):
+        write_fold(d.pattern, args.out)
+    else:
+        to_svg(d.pattern, args.out)
+    print(f"wrote {args.out}")
+    print(f"  packing scale     : {d.packing.scale:.4f}")
+    print(f"  max flap error    : {d.max_flap_error * 100:.2f}%")
+    print(f"  Kawasaki          : {d.kawasaki_pass}/{d.n_interior} interior pass")
+    print(f"  Maekawa           : {d.maekawa_pass}/{d.n_interior} interior pass")
+    print(f"  folds flat        : {d.fold_flat}")
+    print(f"  base              : {d.note}")
 
 
 def _instructions(args) -> None:
@@ -314,8 +356,20 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("design",
                        help="figurative origami: circle-pack a stick-figure tree")
     from foldforge.design import BUILTIN_TREES
-    p.add_argument("tree", help=", ".join(BUILTIN_TREES))
+    p.add_argument("tree", nargs="?", default=None,
+                   help="built-in tree: " + ", ".join(BUILTIN_TREES)
+                        + " (omit when using --from-photo)")
     p.add_argument("out", help="output .svg (crease pattern) or .fold")
+    p.add_argument("--from-photo", metavar="IMG", default=None,
+                   help="photo -> silhouette -> medial-axis stick tree -> base "
+                        "(the full bridge); prints the extracted tree and honest "
+                        "fold-validity")
+    p.add_argument("--rect", type=int, nargs=4, metavar=("X", "Y", "W", "H"),
+                   default=None, help="--from-photo: override GrabCut's auto box "
+                        "(original pixel coords) when it latches onto the background")
+    p.add_argument("--expected", type=int, default=None,
+                   help="--from-photo: expected limb count (starfish=5) for the "
+                        "honesty report only; does not change extraction")
     p.set_defaults(func=_design)
 
     p = sub.add_parser("instructions",

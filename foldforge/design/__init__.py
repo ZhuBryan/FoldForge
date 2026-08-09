@@ -29,6 +29,13 @@ from foldforge.design.treemaker import (
     flap_length_errors,
     folded_schematic,
 )
+from foldforge.design.skeleton import (
+    tree_from_mask,
+    tree_from_image,
+    design_from_image,
+    TreeExtraction,
+    PhotoDesign,
+)
 
 __all__ = [
     "fit_chain",
@@ -50,4 +57,9 @@ __all__ = [
     "design_base",
     "flap_length_errors",
     "folded_schematic",
+    "tree_from_mask",
+    "tree_from_image",
+    "design_from_image",
+    "TreeExtraction",
+    "PhotoDesign",
 ]

@@ -322,6 +322,7 @@ def _incircle_pattern(packing: Packing, hidx: list[int],
     feet_i = []
     edges: list[tuple[int, int]] = []
     assign: list[str] = []
+    faces: list[list[int]] = []
 
     for k in range(m):
         a, b = poly[k], poly[(k + 1) % m]
@@ -332,6 +333,9 @@ def _incircle_pattern(packing: Packing, hidx: list[int],
         cb = corner_idx[hidx[(k + 1) % m]]
         edges.append((ca, fi)); assign.append("B")     # hull side, split at touch
         edges.append((fi, cb)); assign.append("B")
+        # two flat triangles of this wedge (corner->foot->incentre->corner)
+        faces.append([ca, fi, ic_i])
+        faces.append([fi, cb, ic_i])
     for k in range(m):                                  # ridges: corner -> incentre
         edges.append((ic_i, corner_idx[hidx[k]])); assign.append("M")
     for k in range(m):                                  # hinges: incentre -> touch
@@ -345,6 +349,7 @@ def _incircle_pattern(packing: Packing, hidx: list[int],
         vertices=verts,
         edges=np.array(edges, dtype=int),
         assignment=assign,
+        faces=faces,
         metadata={"name": f"treemaker:{packing.tree.name}"},
     )
 
@@ -390,6 +395,7 @@ def _rabbit_ear_pattern(packing: Packing) -> CreasePattern:
     corner_idx = [bag.add(p) for p in pts]     # keep leaf centres first
     edges: list[tuple[int, int]] = []
     assign: list[str] = []
+    faces: list[list[int]] = []
     edge_seen: dict[tuple[int, int], str] = {}
 
     def add_edge(u, v, kind):
@@ -418,6 +424,9 @@ def _rabbit_ear_pattern(packing: Packing) -> CreasePattern:
             # perpendicular incentre->foot. One foot per triangle is V, rest M,
             # so each incentre gets 4 V + 2 M -> Maekawa |M-V| == 2.
             add_edge(ic_i, fi, "V" if k == 0 else "M")
+            # two flat sub-triangles of this wedge
+            faces.append([corner_idx[ga], fi, ic_i])
+            faces.append([fi, corner_idx[gb], ic_i])
         # three bisectors incentre->corner (valley ridges)
         for la in (0, 1, 2):
             add_edge(ic_i, corner_idx[int(t[la])], "V")
@@ -427,6 +436,7 @@ def _rabbit_ear_pattern(packing: Packing) -> CreasePattern:
         vertices=verts,
         edges=np.array(edges, dtype=int),
         assignment=assign,
+        faces=faces,
         metadata={"name": f"treemaker:{packing.tree.name}"},
     )
     return pattern

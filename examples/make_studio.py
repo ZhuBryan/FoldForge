@@ -405,6 +405,93 @@ def bake_animals(force=False):
     return data
 
 
+# --------------------------------------------------------------------------- #
+#  figurative designer - TreeMaker-lite circle-packing bases, baked for the UI #
+# --------------------------------------------------------------------------- #
+# Each built-in tree is packed with the SciPy circle-packing designer
+# (foldforge.design.design_base) at bake time, then stored as a FOLD crease
+# pattern (2-D vertices + M/V/B edges + faces) the studio's existing in-browser
+# PBD .fold viewer folds live - no packing optimiser is ported to JS. We also
+# stash the design's real stats (flaps, Kawasaki/Maekawa, flap-length error) and
+# a tiny inline SVG of the flat crease pattern so the panel shows a genuine
+# design, not decoration.
+_DESIGN_CACHE = os.path.join(_HERE, "_designs_baked.json")
+
+# (tree key, studio label, folds-flat?) - three/four-flap fold flat end to end;
+# five-flap is the honest PARTIAL pentagon (documented in treemaker.py).
+DESIGN_SPECS = [
+    ("three-flap", "Three-flap base", True),
+    ("four-flap", "Four-flap base", True),
+    ("five-flap", "Five-flap base", False),
+]
+
+_CP_COLORS = {"M": "#ff6b6b", "V": "#5b9bd5", "B": "#97a1b0", "F": "#5a6472"}
+
+
+def _cp_svg(pattern, size=150, pad=10):
+    """A compact inline SVG of the flat crease pattern (M red, V blue, B grey)."""
+    v = np.asarray(pattern.vertices, dtype=float)
+    mn, mx = v.min(0), v.max(0)
+    span = np.maximum(mx - mn, 1e-9)
+    s = (size - 2 * pad) / span.max()
+    def px(p):
+        x = pad + (p[0] - mn[0]) * s
+        y = size - (pad + (p[1] - mn[1]) * s)      # flip y for screen coords
+        return round(float(x), 1), round(float(y), 1)
+    lines = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" '
+             f'viewBox="0 0 {size} {size}"><rect width="{size}" height="{size}" fill="#0a0d12"/>']
+    for (a, b), kind in zip(pattern.edges.tolist(), pattern.assignment):
+        (x1, y1), (x2, y2) = px(v[a]), px(v[b])
+        col = _CP_COLORS.get(str(kind).upper(), "#97a1b0")
+        w = 1.1 if str(kind).upper() == "B" else 1.7
+        lines.append(f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" '
+                     f'stroke="{col}" stroke-width="{w}"/>')
+    lines.append("</svg>")
+    raw = "".join(lines).encode("utf-8")
+    return "data:image/svg+xml;base64," + base64.b64encode(raw).decode()
+
+
+def _bake_one_design(key, label, folds_flat):
+    from foldforge.design import get_tree, design_base, flap_length_errors
+    from foldforge.geometry.foldability import foldability_report
+    packing, pattern = design_base(get_tree(key))
+    report = foldability_report(pattern)
+    err = flap_length_errors(packing, pattern)
+    kawasaki = all(v.kawasaki is not False for v in report.vertices)
+    maekawa = all(v.maekawa is not False for v in report.vertices)
+    fold = {
+        "file_spec": 1.1, "file_creator": "FoldForge",
+        "frame_classes": ["creasePattern"], "frame_attributes": ["2D"],
+        "vertices_coords": [[round(float(x), 6) for x in p]
+                            for p in pattern.vertices.tolist()],
+        "edges_vertices": [[int(a), int(b)] for a, b in pattern.edges.tolist()],
+        "edges_assignment": [str(a).upper() for a in pattern.assignment],
+        "faces_vertices": [[int(i) for i in f] for f in pattern.faces],
+        "metadata": {"name": "FoldForge " + label},
+    }
+    return {
+        "key": key, "label": label, "foldsFlat": bool(folds_flat),
+        "flaps": int(len(packing.leaves)),
+        "kawasaki": bool(kawasaki), "maekawa": bool(maekawa),
+        "flatFoldable": bool(report.flat_foldable),
+        "flapErr": round(float(err.max()) * 100.0, 3),   # percent
+        "interiorVerts": int(len(report.vertices)),
+        "cp": _cp_svg(pattern),
+        "fold": fold,
+    }
+
+
+def bake_designs(force=False):
+    """Bake the TreeMaker-lite figurative bases (needs SciPy). Cached to JSON."""
+    if os.path.exists(_DESIGN_CACHE) and not force:
+        with open(_DESIGN_CACHE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    designs = [_bake_one_design(*spec) for spec in DESIGN_SPECS]
+    with open(_DESIGN_CACHE, "w", encoding="utf-8") as f:
+        json.dump(designs, f, separators=(",", ":"))
+    return designs
+
+
 def build_data():
     shapes = {
         "dome":   build_heightfield_shape(heightfield_dome(20, 16), "Dome (relief corrugation)"),
@@ -423,7 +510,9 @@ def build_data():
         for k in anim["order"]:
             shapes[k] = anim["shapes"][k]
             order.append(k)
-    return {"shapes": shapes, "order": order}
+    designs = json.load(open(_DESIGN_CACHE, encoding="utf-8")) \
+        if os.path.exists(_DESIGN_CACHE) else []
+    return {"shapes": shapes, "order": order, "designs": designs}
 
 
 # --------------------------------------------------------------------------- #
@@ -469,6 +558,19 @@ HTML = r"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
  .gmeta .geng{color:#8b95a4}.gmeta .gsym{color:#39d3c7}
  button.gload{padding:5px 10px;font-size:12px;flex:none}
  button.on{background:#3a4a2f;border-color:#5a7a3f}
+ /* figurative designer: collapsible panel of circle-packed bases at left */
+ #designer{position:fixed;left:18px;top:74px;width:262px;max-height:calc(100vh - 200px);overflow-y:auto;
+   background:rgba(16,20,28,.96);border:1px solid #39414f;border-radius:11px;padding:10px;display:none;z-index:46}
+ #designer h3{margin:2px 2px 6px;font-size:14px}
+ #designer .dnote{font-size:11px;color:#8b95a4;margin:0 2px 9px;line-height:1.4}
+ .dcard{display:flex;gap:9px;align-items:flex-start;padding:7px;border:1px solid #2a3140;border-radius:8px;margin-bottom:8px;background:rgba(31,37,49,.6)}
+ .dcard img{width:66px;height:66px;object-fit:contain;border-radius:6px;background:#0a0d12;flex:none}
+ .dmeta{font-size:11px;line-height:1.4;flex:1;min-width:0}
+ .dmeta b{font-size:12px}
+ .badge{display:inline-block;font-size:10px;padding:1px 6px;border-radius:9px;margin-left:5px;vertical-align:middle}
+ .badge.flat{background:#25422f;color:#7fd39a}.badge.partial{background:#4a3a25;color:#e0b877}
+ .dstat{color:#9aa4b2;margin:2px 0}
+ button.dload{margin-top:5px;padding:5px 10px;font-size:12px}
 </style></head><body>
 <div id="hud"><b>FoldForge Studio</b><br><small>drag rotate &middot; scroll zoom &middot; pick a shape and fold it, or fold your own image</small></div>
 <div class="legend"><span class="m">&#9632;</span>mountain <span class="v">&#9632;</span>valley <span class="t">&#9472;</span>target<br><small>exact rigid fold kinematics</small></div>
@@ -482,6 +584,9 @@ HTML = r"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 </div>
 <div id="gallery"><h3>Showcase gallery</h3><div id="gallerylist"></div>
  <div style="font-size:11px;color:#8b95a4;margin:3px 2px">Baked offline with the OpenCV pipeline; the butterfly is shown raw and bilaterally symmetrized for a before/after.</div></div>
+<div id="designer"><h3>Design a figure</h3>
+ <div class="dnote">Circle-packing (TreeMaker) method: each stick figure&rsquo;s limbs become flaps of a uniaxial base. Fold a base to see the crease pattern fold live.</div>
+ <div id="designerlist"></div></div>
 <div id="status"></div>
 <div id="ui">
  <select id="shape" title="Pick a built-in shape or a baked sample to fold. Uploaded photos and opened .fold files also appear in this list."></select>
@@ -518,6 +623,7 @@ HTML = r"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
  <button id="texBtn" title="Texture the folded sheet with the source photo, or show blank paper. The reference photo always stays in its own panel.">&#128444;&#65039; Texture: Paper</button>
  <button id="heatBtn" class="on" title="Show or hide the photo pipeline strip (input &rarr; height field &rarr; symmetrized). Green = shown.">&#128200; Pipeline</button>
  <button id="galleryBtn" title="Show or hide the showcase gallery of baked sample results. Green = shown.">&#127912; Gallery</button>
+ <button id="designBtn" title="Show or hide the figurative designer: circle-packing (TreeMaker) bases you can fold live. Green = shown.">&#129529; Design a figure</button>
  <!-- playback -->
  <button id="play" title="Play or pause the folding animation.">&#10073;&#10073; Pause fold</button>
  <label class="fold">fold <input id="slider" type="range" min="0" max="1" step="0.001" value="0"></label>
@@ -1149,7 +1255,12 @@ const enginemode=document.getElementById('enginemode');
 enginemode.addEventListener('change',()=>{engineMode=enginemode.value; rebuildImage();});
 const galleryBtn=document.getElementById('galleryBtn'),galleryPanel=document.getElementById('gallery');
 galleryBtn.addEventListener('click',()=>{const open=galleryPanel.style.display!=='block';
-  galleryPanel.style.display=open?'block':'none'; galleryBtn.classList.toggle('on',open);});
+  galleryPanel.style.display=open?'block':'none'; galleryBtn.classList.toggle('on',open);
+  if(open){designerPanel.style.display='none';designBtn.classList.remove('on');}});
+const designBtn=document.getElementById('designBtn'),designerPanel=document.getElementById('designer');
+designBtn.addEventListener('click',()=>{const open=designerPanel.style.display!=='block';
+  designerPanel.style.display=open?'block':'none'; designBtn.classList.toggle('on',open);
+  if(open){galleryPanel.style.display='none';galleryBtn.classList.remove('on');}});
 heatBtn.addEventListener('click',()=>{heatOn=!heatOn; heatBtn.classList.toggle('on',heatOn); drawPipeline(S);});
 // Photo-texture toggle: swap the current sheet between blank paper and the photo,
 // no rebuild needed (UVs are already on the geometry).
@@ -1272,6 +1383,39 @@ function buildGallery(){
   });
 }
 buildGallery();
+// figurative designer: cards for each baked TreeMaker-lite circle-packed base.
+// "Fold this base" loads the base's FOLD crease pattern into the SAME in-browser
+// PBD viewer .fold uploads use, so the design folds live; the flat crease
+// pattern (M red / V blue / B grey) and real stats show alongside it.
+function foldDesign(d){
+  const shape=buildFoldShape(d.fold); shape.label=d.label+' — circle-packed base, folding live';
+  DATA.shapes['__design']=shape;
+  if(!DATA.order.includes('__design')){DATA.order.push('__design'); const o=document.createElement('option');o.value='__design';o.textContent=shape.label;sel.appendChild(o);}
+  else{const ex=[...sel.options].find(o=>o.value==='__design'); if(ex)ex.textContent=shape.label;}
+  sel.value='__design'; buildShape('__design'); t=0;dir=1;playing=true;play.innerHTML='&#10073;&#10073; Pause fold';
+  const th=(v)=>v?'✓':'✗';
+  setStatus('Folded '+d.label+' — circle-packing (TreeMaker) base · '+d.flaps+' flaps · '
+    +(d.foldsFlat?'folds flat':'partial fold')+' · Kawasaki '+th(d.kawasaki)+' Maekawa '+th(d.maekawa)
+    +' · flap-length error '+d.flapErr.toFixed(2)+'%','ok');
+}
+function buildDesigns(){
+  const list=document.getElementById('designerlist'); const designs=DATA.designs||[];
+  if(!designs.length){list.innerHTML='<div class="dnote">No baked designs (SciPy was unavailable at build time).</div>'; return;}
+  designs.forEach(d=>{const card=document.createElement('div'); card.className='dcard';
+    const im=document.createElement('img'); im.src=d.cp; im.alt=d.label+' crease pattern';
+    const meta=document.createElement('div'); meta.className='dmeta';
+    const badge=d.foldsFlat?'<span class="badge flat">folds flat</span>':'<span class="badge partial">partial</span>';
+    const th=(v)=>v?'✓':'✗';
+    meta.innerHTML='<b>'+d.label+'</b>'+badge
+      +'<div class="dstat">'+d.flaps+' flaps · flap error '+d.flapErr.toFixed(2)+'%</div>'
+      +'<div class="dstat">Kawasaki '+th(d.kawasaki)+' · Maekawa '+th(d.maekawa)
+      +(d.foldsFlat?'':' · non-tangent diagonal unresolved')+'</div>';
+    const btn=document.createElement('button'); btn.className='dload'; btn.textContent='Fold this base';
+    btn.addEventListener('click',()=>foldDesign(d));
+    meta.appendChild(btn); card.appendChild(im); card.appendChild(meta); list.appendChild(card);
+  });
+}
+buildDesigns();
 sel.addEventListener('change',()=>{buildShape(sel.value);t=0;dir=1;playing=true;play.innerHTML='&#10073;&#10073; Pause fold';});
 slider.addEventListener('input',()=>{playing=false;play.innerHTML='&#9654; Play fold';t=parseFloat(slider.value);});
 play.addEventListener('click',()=>{playing=!playing;play.innerHTML=playing?'&#10073;&#10073; Pause fold':'&#9654; Play fold';});
@@ -1380,6 +1524,10 @@ def main():
         bake_animals()                              # refresh the sample-animal cache (needs OpenCV)
     except Exception as e:                          # keep the six geometric shapes working regardless
         print("sample-animal bake skipped:", e)
+    try:
+        bake_designs(force=True)                    # refresh the figurative-designer cache (needs SciPy)
+    except Exception as e:                          # studio still works without the designer panel
+        print("figurative-design bake skipped:", e)
     data = build_data()
     blob = json.dumps(data, separators=(",", ":"))
     three_src = load_three()

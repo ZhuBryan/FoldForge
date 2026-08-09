@@ -23,6 +23,7 @@ const fs = require('fs');
   const shotMiura = path.join(__dirname, 'output', 'studio_live_miura.png');
   const shotEasy = path.join(__dirname, 'output', 'studio_difficulty_easy.png');
   const shotDetailed = path.join(__dirname, 'output', 'studio_difficulty_detailed.png');
+  const shotDesigner = path.join(__dirname, 'output', 'studio_designer.png');
   const setFold = f => page.evaluate(v => { const s = document.getElementById('slider'); s.value = v; s.dispatchEvent(new Event('input')); }, f);
   // panel-1 ("input photo") image source, as the browser resolves it
   const panelSrc = async () => page.evaluate(() => {
@@ -180,8 +181,42 @@ const fs = require('fs');
   await page.screenshot({path: shotMiura});
   const miGrid = mi[1] + '×' + mi[2], miIters = mi[3], miErr = mi[4], miMs = mi[5];
 
+  // ---- figurative designer: open "Design a figure", fold the four-flap base ----
+  await page.click('#designBtn');
+  await new Promise(r => setTimeout(r, 400));
+  const dInfo = await page.evaluate(() => {
+    const cards = [...document.querySelectorAll('#designerlist .dcard')];
+    const cpOk = cards.length > 0 && cards.every(c => ((c.querySelector('img') || {}).src || '').startsWith('data:image/svg'));
+    return { n: cards.length, cpOk, four: (DATA.designs || []).some(d => d.key === 'four-flap') };
+  });
+  if (dInfo.n < 2) await fail('designer panel has too few base cards: ' + dInfo.n);
+  if (!dInfo.cpOk) await fail('designer cards missing crease-pattern thumbnails');
+  if (!dInfo.four) await fail('four-flap design not present in DATA.designs');
+  const dClicked = await page.evaluate(() => {
+    for (const c of document.querySelectorAll('#designerlist .dcard'))
+      if (/Four-flap/i.test(c.textContent)) { c.querySelector('button.dload').click(); return true; }
+    return false;
+  });
+  if (!dClicked) await fail('four-flap "Fold this base" button not found');
+  await new Promise(r => setTimeout(r, 700));
+  const dStatus = await status();
+  if (!/^Folded .*Four-flap/.test(dStatus)) await fail('four-flap fold did not update status: ' + dStatus);
+  if (!/TreeMaker/.test(dStatus)) await fail('four-flap status missing TreeMaker note: ' + dStatus);
+  if (!/flap-length error/.test(dStatus)) await fail('four-flap status missing flap-error stat: ' + dStatus);
+  await setFold(1);
+  await new Promise(r => setTimeout(r, 1500));
+  const dRelief = await page.evaluate(() => {
+    const p = geo.attributes.position.array; let zmin = 1e9, zmax = -1e9;
+    for (let k = 2; k < p.length; k += 3) { if (p[k] < zmin) zmin = p[k]; if (p[k] > zmax) zmax = p[k]; }
+    return { z: zmax - zmin, dynamic: !!(S && S.dynamic), verts: geo.attributes.position.count };
+  });
+  if (!dRelief.dynamic) await fail('four-flap did not load as a live .fold model');
+  if (!(dRelief.z > 0.1)) await fail('four-flap base did not fold (z-relief ' + dRelief.z + ')');
+  await page.screenshot({path: shotDesigner});
+
   if (errs.length) await fail('uncaught page errors');
   console.log('OK — studio folds', path.basename(img),
+    '| designer cards', dInfo.n, 'four-flap fold z-relief', dRelief.z.toFixed(2), '| designer shot', shotDesigner,
     '| 2-D Miura live fit', miGrid, 'grid,', miIters, 'iters, error', miErr, ',', miMs + 'ms, z-relief', meshOk.toFixed(2),
     '| live mirror-IoU', mirror, applied ? '(symmetrized)' : '(left as-is)',
     '| baked butterfly_sym IoU', gsym.iou, '| gallery cards', cards,
