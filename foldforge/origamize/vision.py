@@ -164,7 +164,12 @@ def _auto_rect(bgr, inset: float = 0.06):
         x = max(0, x - m); y = max(0, y - m)
         rw = min(w - x, rw + 2 * m); rh = min(h - y, rh + 2 * m)
         area = rw * rh / float(w * h)                   # reject whole-frame / sliver boxes
-        if rw < 8 or rh < 8 or area < 0.02 or area > 0.98:
+        # A box that spans a full frame dimension has bled off the subject into a
+        # textured background (e.g. a starfish on wood grain, whose grain lights up
+        # the edge-density map edge to edge): the blob is the background, not the
+        # subject. Fall back to the centred inset box, which holds a centred subject.
+        spans_frame = rw >= 0.98 * w or rh >= 0.98 * h
+        if rw < 8 or rh < 8 or area < 0.02 or area > 0.98 or spans_frame:
             return fallback
         return (int(x), int(y), int(rw), int(rh))
     except Exception:
