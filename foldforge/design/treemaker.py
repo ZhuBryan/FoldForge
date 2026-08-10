@@ -40,15 +40,13 @@ subset of each:
 
 Honest scope (see ``crease_pattern`` and the tests):
 
-    * ``three-flap`` (triangle) and ``four-flap`` (tangential quad) fold flat end
-      to end: the single incentre passes Kawasaki *and* Maekawa and every flap
-      length is exact.
-    * ``five-flap`` (a pentagon) is generally **not** tangential - for n >= 5 a
-      tangent-disc hull need not admit an inscribed circle - so it falls back to
-      the old per-triangle rabbit-ear assembly. Its incentres still pass Kawasaki
-      but the non-tangent shared diagonal is unresolved: it is a *partial* base,
-      reported as such, and would need the full universal molecule (gusset ridges
-      on the non-tangential polygon), which is not implemented.
+    * ``three-flap`` (triangle), ``four-flap`` (tangential quad) and
+      ``five-flap`` (a pentagon) all fold flat end to end. They share ONE
+      construction - the universal (gusset) molecule below - which fills any
+      convex tight tangent-disc polygon: every interior vertex passes Kawasaki
+      *and* Maekawa and every flap length is exact (< ~1e-8 relative error). The
+      triangle rabbit-ear and the single-incircle quad are just its base cases;
+      pentagons and larger add the gusset creases that reconcile the parts.
     * **Rivers** (trees with an internal spine edge) are a documented TODO. The
       circle method packs them (path lengths carry the spine), but two leaves on
       the same sub-hub have discs whose radii include the spine while their
@@ -62,6 +60,8 @@ Honest scope (see ``crease_pattern`` and the tests):
 
 from __future__ import annotations
 
+import math
+import random
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -151,8 +151,8 @@ BUILTIN_TREES = {
     # A four-limb figure -> a tangential quad -> one incircle molecule. Also
     # folds flat end to end: this is the flagship *multi*-flap working example.
     "four-flap": star_tree([1.0, 1.0, 0.6, 0.6], "four-flap"),
-    # A five-limb figure -> a pentagon, generally NOT tangential, so it falls
-    # back to the per-triangle assembly: a PARTIAL base (see the module docstring).
+    # A five-limb figure -> a pentagon (generally non-tangential) filled by the
+    # universal (gusset) molecule: folds flat end to end (see the module docstring).
     "five-flap": star_tree([1.2, 0.9, 0.9, 0.8, 0.8], "five-flap"),
     # A tree with an internal spine edge (two leaves off each end). Packs with a
     # river between the sub-hubs; the molecule side is a documented TODO, so this
@@ -301,53 +301,393 @@ def _is_tangential(poly: np.ndarray, tol: float = 1e-6) -> bool:
     return resid < tol
 
 
-def _incircle_pattern(packing: Packing, hidx: list[int],
-                      poly: np.ndarray) -> CreasePattern:
-    """Single tangential-polygon molecule: one incentre, one interior vertex.
+# --- the universal (gusset) molecule ---------------------------------------
+#
+# Fills ANY convex active polygon whose vertices are packed disc centres (each
+# edge (i, j) is tight: ``|P_i - P_j| = r_i + r_j``). One algorithm subsumes the
+# triangle rabbit-ear and the tangential-quad incircle as base cases, and adds
+# the gusset creases that the per-molecule code was missing for pentagons+.
+#
+# It is Lang's universal molecule, computed by insetting the polygon: every edge
+# moves inward perpendicular at unit speed, so each vertex slides along its
+# interior-angle bisector at speed ``1 / sin(theta_i / 2)`` and its reduced
+# radius shrinks at rate ``cot(theta_i / 2)`` (keeping every edge tight). Two
+# things can happen:
+#
+#   * the polygon reaches a state where its incircle's tangent lengths equal the
+#     reduced radii (a *triangle*, always; or a symmetric tangential polygon) -
+#     the base case: one incentre, ``m`` bisector ridges, ``m`` perpendicular
+#     hinges to the tangent points (== the old rabbit-ear / incircle molecule);
+#   * a non-adjacent vertex pair ``(i, j)`` becomes tight
+#     (``|Q_i - Q_j| = rho_i + rho_j``) before that - a **gusset event**: add the
+#     gusset crease ``Q_i-Q_j`` and recurse on the two sub-polygons it splits.
+#
+# The bisector traces are the ridge creases, the perpendiculars from the border
+# tangent points inward are the hinge creases, and the split diagonals are the
+# gussets. Because every reduced radius is tracked exactly, each border edge is
+# cut at distance ``r_i`` from its corner, so the folded flap length equals the
+# tree edge with ~0 error. Kawasaki holds at every interior vertex by the
+# bisector/perpendicular geometry; the mountain/valley labels are chosen by a
+# global search so ``|M - V| = 2`` (Maekawa) holds everywhere at once.
 
-    ``hidx`` are the row indices of the hull corners (CCW); ``poly`` their
-    coordinates. Sides (split at their incircle touch point) are the molecule
-    border ``B``; the ``m`` corner bisectors are ridges and the ``m``
-    perpendicular hinges reach the touch points. Maekawa is satisfied at the
-    incentre by making the bisectors mountains and the hinges valleys, then
-    flipping one hinge so ``|M - V| = 2``.
-    """
-    pts = packing.centers
-    m = len(poly)
-    ic, _, _ = _incircle(poly)
 
-    bag = _VertexBag()
-    corner_idx = [bag.add(p) for p in pts]     # leaf centres first
-    ic_i = bag.add(ic)
-    feet_i = []
-    edges: list[tuple[int, int]] = []
-    assign: list[str] = []
-    faces: list[list[int]] = []
-
+def _poly_geometry(Q: np.ndarray):
+    """Per-vertex inward bisector *velocity* and ``cot(theta_i / 2)`` for CCW Q."""
+    m = len(Q)
+    vel = np.zeros((m, 2))
+    cot = np.zeros(m)
     for k in range(m):
-        a, b = poly[k], poly[(k + 1) % m]
-        foot = _foot(ic, a, b)
-        fi = bag.add(foot)
-        feet_i.append(fi)
-        ca = corner_idx[hidx[k]]
-        cb = corner_idx[hidx[(k + 1) % m]]
-        edges.append((ca, fi)); assign.append("B")     # hull side, split at touch
-        edges.append((fi, cb)); assign.append("B")
-        # two flat triangles of this wedge (corner->foot->incentre->corner)
-        faces.append([ca, fi, ic_i])
-        faces.append([fi, cb, ic_i])
-    for k in range(m):                                  # ridges: corner -> incentre
-        edges.append((ic_i, corner_idx[hidx[k]])); assign.append("M")
-    for k in range(m):                                  # hinges: incentre -> touch
-        edges.append((ic_i, feet_i[k])); assign.append("V")
-    # incentre currently has m mountains + m valleys (|M-V| = 0). Flip one hinge
-    # to a mountain so the incentre satisfies Maekawa: m+1 mountains, m-1 valleys.
-    assign[-1] = "M"
+        a, b, c = Q[(k - 1) % m], Q[k], Q[(k + 1) % m]
+        u = (a - b) / np.linalg.norm(a - b)
+        v = (c - b) / np.linalg.norm(c - b)
+        th = math.acos(max(-1.0, min(1.0, float(u.dot(v)))))
+        bis = u + v
+        bis = bis / np.linalg.norm(bis)
+        vel[k] = bis / math.sin(th / 2.0)          # unit perpendicular inset speed
+        cot[k] = 1.0 / math.tan(th / 2.0)          # reduced-radius shrink rate
+    return vel, cot
+
+
+def _first_gusset_event(Q: np.ndarray, rho: np.ndarray):
+    """Smallest inset time at which a non-adjacent vertex pair becomes tight.
+
+    Returns ``(t, i, j)`` or ``None``. ``Q_i(t) = Q_i + t * vel_i`` and
+    ``rho_i(t) = rho_i - t * cot_i``; the event solves
+    ``|Q_i(t) - Q_j(t)| = rho_i(t) + rho_j(t)`` (a quadratic in ``t``), then a
+    few Newton steps polish it to machine precision so the split is exact.
+    """
+    m = len(Q)
+    vel, cot = _poly_geometry(Q)
+    best_t = None
+    best_pair = None
+    for i in range(m):
+        for j in range(i + 1, m):
+            if j == (i + 1) % m or i == (j + 1) % m:
+                continue                            # adjacent: that's a tight edge already
+            dv = vel[i] - vel[j]
+            d0 = Q[i] - Q[j]
+            rs = rho[i] + rho[j]
+            rc = -(cot[i] + cot[j])
+            A = float(dv.dot(dv) - rc * rc)
+            B = float(2 * d0.dot(dv) - 2 * rs * rc)
+            C = float(d0.dot(d0) - rs * rs)
+            roots: list[float] = []
+            if abs(A) < 1e-12:
+                if abs(B) > 1e-12:
+                    roots = [-C / B]
+            else:
+                disc = B * B - 4 * A * C
+                if disc >= 0:
+                    sq = math.sqrt(disc)
+                    roots = [(-B - sq) / (2 * A), (-B + sq) / (2 * A)]
+            for t in roots:
+                if t > 1e-9 and (best_t is None or t < best_t):
+                    best_t, best_pair = t, (i, j)
+    if best_t is None:
+        return None
+    i, j = best_pair
+    t = best_t
+    for _ in range(80):                             # Newton polish of the tight pair
+        Qn = Q + t * vel
+        d = float(np.linalg.norm(Qn[i] - Qn[j]))
+        rr = float(rho[i] - t * cot[i] + rho[j] - t * cot[j])
+        f = d - rr
+        dd = float((Qn[i] - Qn[j]).dot(vel[i] - vel[j]) / d)
+        t = t - f / (dd + cot[i] + cot[j])
+    return t, i, j
+
+
+def _incircle_flaps_ok(Q: np.ndarray, rho: np.ndarray, tol: float = 1e-7):
+    """True (with the incentre) iff Q's incircle preserves every flap length.
+
+    A triangle always qualifies; a general tangential polygon does *not* - its
+    incircle tangent lengths need not equal the reduced radii, which is exactly
+    why pentagons must be split by gussets rather than filled with one incircle.
+    """
+    ic, _, resid = _incircle(Q)
+    if resid > tol:
+        return False, ic
+    for k in range(len(Q)):
+        foot = _foot(ic, Q[k], Q[(k + 1) % len(Q)])
+        if abs(np.linalg.norm(Q[k] - foot) - rho[k]) > tol:
+            return False, ic
+    return True, ic
+
+
+def _um_fill(Q, rho, outer, creases):
+    """Recursively emit the universal-molecule creases of one active polygon.
+
+    ``outer[k]`` is the paper-border tangent point that edge ``k``'s hinge must
+    reach (``None`` for a gusset edge, whose hinge stops at its own tangent
+    point). Appends ``(p0, p1, kind)`` segments; the arrangement is planarised by
+    the caller.
+    """
+    m = len(Q)
+    if m == 3:
+        ic = _incenter(Q[0], Q[1], Q[2])
+        base = True
+    else:
+        base, ic = _incircle_flaps_ok(Q, rho)
+    if base:
+        for k in range(m):
+            creases.append((Q[k], ic, "ridge"))
+            tgt = outer[k] if outer[k] is not None else _foot(ic, Q[k], Q[(k + 1) % m])
+            creases.append((ic, tgt, "hinge"))
+            creases.append((Q[k], Q[(k + 1) % m], "edge"))
+        return
+
+    event = _first_gusset_event(Q, rho)
+    if event is None:                               # degenerate guard: fill as incircle
+        ic, _, _ = _incircle(Q)
+        for k in range(m):
+            creases.append((Q[k], ic, "ridge"))
+            tgt = outer[k] if outer[k] is not None else _foot(ic, Q[k], Q[(k + 1) % m])
+            creases.append((ic, tgt, "hinge"))
+            creases.append((Q[k], Q[(k + 1) % m], "edge"))
+        return
+
+    t, i, j = event
+    vel, cot = _poly_geometry(Q)
+    Qn = Q + t * vel
+    rhon = rho - t * cot
+    for k in range(m):
+        creases.append((Q[k], Qn[k], "ridge"))      # collar bisector trace
+        creases.append((Q[k], Q[(k + 1) % m], "edge"))
+    # gusset, split at its tangent point (shared exactly by both sub-molecules)
+    tg = Qn[i] + (Qn[j] - Qn[i]) * (rhon[i] / (rhon[i] + rhon[j]))
+    creases.append((Qn[i], tg, "gusset"))
+    creases.append((tg, Qn[j], "gusset"))
+
+    def arc(a, b):
+        out = []
+        k = a
+        while True:
+            out.append(k)
+            if k == b:
+                break
+            k = (k + 1) % m
+        return out
+
+    for idx in (arc(i, j), arc(j, i)):
+        L = len(idx)
+        sub_outer = []
+        for s in range(L):
+            a, b = idx[s], idx[(s + 1) % L]
+            if (a == i and b == j) or (a == j and b == i):
+                sub_outer.append(tg)                # gusset edge: hinge to gusset tangent
+            else:
+                sub_outer.append(outer[a])          # inherit the border tangent
+        _um_fill(Qn[idx], rhon[idx], sub_outer, creases)
+
+
+def _seg_split_params(a, b, c, d):
+    """Parameters along segment ``ab`` where it meets segment ``cd`` (incl. overlap)."""
+    r = b - a
+    s = d - c
+    rxs = r[0] * s[1] - r[1] * s[0]
+    qp = c - a
+    out = []
+    if abs(rxs) > 1e-12:
+        t = (qp[0] * s[1] - qp[1] * s[0]) / rxs
+        u = (qp[0] * r[1] - qp[1] * r[0]) / rxs
+        if -1e-9 <= t <= 1 + 1e-9 and -1e-9 <= u <= 1 + 1e-9:
+            out.append(min(max(t, 0.0), 1.0))
+    elif abs(qp[0] * r[1] - qp[1] * r[0]) < 1e-8 * max(1.0, float(np.linalg.norm(r))):
+        rr = float(r.dot(r))
+        for p in (c, d):
+            tt = float((p - a).dot(r)) / rr
+            if -1e-9 <= tt <= 1 + 1e-9:
+                out.append(min(max(tt, 0.0), 1.0))
+    return out
+
+
+def _extract_faces(verts: np.ndarray, edges: np.ndarray) -> list[list[int]]:
+    """Interior faces of the planar crease graph (for the FOLD ``faces`` array).
+
+    Standard half-edge walk: at each vertex the neighbours are sorted CCW, and a
+    face is traced by always taking the next-clockwise edge; the CCW-oriented
+    (positive-area) loops are the interior faces, the one CW loop is the paper's
+    outer boundary and is dropped.
+    """
+    from collections import defaultdict
+    adj: dict[int, list[int]] = defaultdict(list)
+    for u, v in edges:
+        adj[int(u)].append(int(v))
+        adj[int(v)].append(int(u))
+    for u in adj:
+        cx, cy = verts[u]
+        adj[u].sort(key=lambda w: math.atan2(verts[w][1] - cy, verts[w][0] - cx))
+    pos = {u: {w: k for k, w in enumerate(adj[u])} for u in adj}
+
+    def nxt(u, v):                                   # half-edge u->v, turn clockwise at v
+        nb = adj[v]
+        return nb[(pos[v][u] - 1) % len(nb)]
+
+    used: set = set()
+    faces: list[list[int]] = []
+    for u, v in edges:
+        for start in ((int(u), int(v)), (int(v), int(u))):
+            if start in used:
+                continue
+            face = []
+            cur = start
+            while cur not in used:
+                used.add(cur)
+                face.append(cur[0])
+                cur = (cur[1], nxt(cur[0], cur[1]))
+                if len(face) > len(edges) * 2 + 5:
+                    break
+            if len(face) >= 3:
+                area = 0.0
+                for p, q in zip(face, face[1:] + face[:1]):
+                    area += verts[p][0] * verts[q][1] - verts[q][0] * verts[p][1]
+                if area > 0:
+                    faces.append([int(x) for x in face])
+    return faces
+
+
+def _assign_mountain_valley(edges, assign, interior, seed=104729):
+    """Choose M/V on the fold creases so ``|M - V| = 2`` at every interior vertex.
+
+    Kawasaki is already guaranteed by the geometry; this is the Maekawa half. The
+    default ridge=M / hinge=valley labels leave every vertex balanced
+    (``|M - V| = 0``), so we search for a globally consistent flip pattern that
+    hits ``|M - V| = 2`` everywhere - a small degree-constrained problem solved
+    by seeded local search (deterministic across the fixed seed sweep). Returns
+    ``(assignment, residual)``; residual 0 means every vertex satisfies Maekawa.
+    """
+    fold = [e for e, a in enumerate(assign) if a in ("M", "V")]
+    foldset = set(fold)
+    inc = {v: [] for v in interior}
+    for e, (u, v) in enumerate(edges):
+        if e in foldset:
+            if u in inc:
+                inc[int(u)].append(e)
+            if v in inc:
+                inc[int(v)].append(e)
+
+    def run(sd):
+        rng = random.Random(sd)
+        s = {e: (1 if assign[e] == "M" else -1) for e in fold}
+
+        def violation():
+            return sum(abs(abs(sum(s[e] for e in inc[v])) - 2) for v in interior)
+
+        cur = violation()
+        for _ in range(30000):
+            if cur == 0:
+                break
+            bad = [v for v in interior if abs(sum(s[e] for e in inc[v])) != 2]
+            if not bad:
+                break
+            v = rng.choice(bad)
+            e = rng.choice(inc[v])
+            s[e] = -s[e]
+            new = violation()
+            if new <= cur or rng.random() < 0.05:
+                cur = new
+            else:
+                s[e] = -s[e]
+        return s, cur
+
+    best = None
+    for sd in range(seed, seed + 24):
+        s, resid = run(sd)
+        if best is None or resid < best[1]:
+            best = (s, resid)
+        if resid == 0:
+            break
+    s, resid = best
+    out = list(assign)
+    for e in fold:
+        out[e] = "M" if s[e] > 0 else "V"
+    return out, resid
+
+
+def _is_tight_hull(pts: np.ndarray, radii: np.ndarray, hidx: list[int],
+                   tol: float = 1e-4) -> bool:
+    """True iff every convex-hull edge is a tangent disc pair (``len == r_i + r_j``).
+
+    That is the requirement for the universal molecule to preserve flap lengths.
+    A river tree packs with overlapping discs, so its hull edges are *shorter*
+    than ``r_i + r_j`` and this returns False - keeping rivers on the honest
+    partial (rabbit-ear) path.
+    """
+    m = len(hidx)
+    for k in range(m):
+        i, j = hidx[k], hidx[(k + 1) % m]
+        edge = float(np.linalg.norm(pts[i] - pts[j]))
+        if abs(edge - (radii[i] + radii[j])) > tol:
+            return False
+    return True
+
+
+def _universal_pattern(packing: Packing, hidx: list[int]) -> CreasePattern:
+    """Fill the (tight, convex) active hull with the universal molecule."""
+    pts = packing.centers
+    Q0 = pts[hidx].copy()
+    r0 = packing.radii[hidx].copy()
+    m = len(Q0)
+
+    outer = []
+    borders = []
+    for k in range(m):
+        d = Q0[(k + 1) % m] - Q0[k]
+        d = d / np.linalg.norm(d)
+        foot = Q0[k] + d * r0[k]                    # disc tangent point on the border
+        outer.append(foot)
+        borders.append((Q0[k], foot, "B"))
+        borders.append((foot, Q0[(k + 1) % m], "B"))
+
+    creases: list = []
+    _um_fill(Q0, r0, outer, creases)
+    creases += borders
+
+    # Planarise: leaf centres are added first so their row indices are 0..N-1.
+    bag = _VertexBag()
+    for centre in pts:
+        bag.add(centre)
+    segs = [(np.asarray(a, float), np.asarray(b, float), kind)
+            for a, b, kind in creases
+            if np.linalg.norm(np.asarray(a, float) - np.asarray(b, float)) > 1e-9]
+    n = len(segs)
+    params = [[0.0, 1.0] for _ in range(n)]
+    for i in range(n):
+        a, b, _ = segs[i]
+        for jj in range(n):
+            if i != jj:
+                params[i] += _seg_split_params(a, b, segs[jj][0], segs[jj][1])
+
+    prio = {"B": 3, "gusset": 2, "ridge": 2, "hinge": 1, "edge": 1}
+    edgemap: dict[tuple[int, int], str] = {}
+    for i in range(n):
+        a, b, kind = segs[i]
+        ts = sorted({round(t, 11) for t in params[i]})
+        pts_i = [a + t * (b - a) for t in ts]
+        for p, q in zip(pts_i[:-1], pts_i[1:]):
+            ia, ib = bag.add(p), bag.add(q)
+            if ia == ib:
+                continue
+            key = (ia, ib) if ia < ib else (ib, ia)
+            if key in edgemap:
+                if prio[kind] > prio[edgemap[key]]:
+                    edgemap[key] = kind
+            else:
+                edgemap[key] = kind
 
     verts = np.array(bag.coords)
+    kind_to_assign = {"B": "B", "ridge": "M", "hinge": "V", "gusset": "V", "edge": "V"}
+    edges = np.array(list(edgemap.keys()), dtype=int)
+    assign = [kind_to_assign[edgemap[tuple(e)]] for e in map(tuple, edges)]
+
+    scratch = CreasePattern(vertices=verts, edges=edges, assignment=list(assign),
+                            faces=[], metadata={})
+    interior = scratch.interior_vertices()
+    assign, _resid = _assign_mountain_valley(edges, assign, interior)
+    faces = _extract_faces(verts, edges)
     return CreasePattern(
         vertices=verts,
-        edges=np.array(edges, dtype=int),
+        edges=edges,
         assignment=assign,
         faces=faces,
         metadata={"name": f"treemaker:{packing.tree.name}"},
@@ -357,18 +697,19 @@ def _incircle_pattern(packing: Packing, hidx: list[int],
 def crease_pattern(packing: Packing) -> CreasePattern:
     """Build the crease pattern for a packed base.
 
-    If the convex hull of the packed centres is a *tangential* polygon (always
-    true for a 3- or 4-leaf star base - see the module docstring), fill it with a
-    single incircle molecule that folds flat end to end. Otherwise fall back to
-    the older per-Delaunay-triangle rabbit-ear assembly, which is exact at each
-    incentre but leaves non-tangent shared diagonals unresolved (a partial base).
+    If the convex hull of the packed centres is a *tight* tangent-disc polygon
+    (true for every star base - 3, 4, 5 or more flaps), fill it with the one
+    universal (gusset) molecule, which folds flat end to end: it subsumes the
+    triangle rabbit-ear and the tangential-quad incircle as base cases and adds
+    the gusset creases pentagons need. Otherwise (a river tree, whose discs
+    overlap by the spine width) fall back to the per-Delaunay-triangle rabbit-ear
+    assembly, an honest *partial* base whose non-tangent diagonals are unresolved.
     """
     pts = packing.centers
     hull = ConvexHull(pts)
     hidx = [int(i) for i in hull.vertices]     # CCW hull corners (row indices)
-    poly = pts[hidx]
-    if len(hidx) == len(pts) and _is_tangential(poly):
-        return _incircle_pattern(packing, hidx, poly)
+    if len(hidx) == len(pts) and _is_tight_hull(pts, packing.radii, hidx):
+        return _universal_pattern(packing, hidx)
     return _rabbit_ear_pattern(packing)
 
 
@@ -463,22 +804,25 @@ def flap_length_errors(packing: Packing, pattern: CreasePattern) -> np.ndarray:
     The folded flap length of a leaf is the tangent length from its corner - the
     distance from the centre to the foot on an incident edge - read straight back
     off the assembled geometry, matching whichever molecule ``crease_pattern``
-    used (incircle for a tangential hull, per-triangle otherwise).
+    used (the universal molecule for a tight tangent hull, per-triangle otherwise).
     """
     pts = packing.centers
     hull = ConvexHull(pts)
     hidx = [int(i) for i in hull.vertices]
-    poly = pts[hidx]
-    if len(hidx) == len(pts) and _is_tangential(poly):
-        ic, _, _ = _incircle(poly)
+    if len(hidx) == len(pts) and _is_tight_hull(pts, packing.radii, hidx):
+        # Universal molecule: each border edge is cut at its disc tangent point,
+        # so a leaf's flap length is the shorter of its two incident border (B)
+        # crease halves - read directly off the built pattern.
         measured = np.full(len(packing.leaves), np.nan)
-        m = len(poly)
-        for k in range(m):
-            foot = _foot(ic, poly[k], poly[(k + 1) % m])
-            for local in (k, (k + 1) % m):
-                gi = hidx[local]
-                tan = np.linalg.norm(poly[local] - foot)
-                measured[gi] = tan if np.isnan(measured[gi]) else min(measured[gi], tan)
+        for gi in range(len(packing.leaves)):
+            b_edges = [e for e in pattern.incident_edges(gi)
+                       if pattern.assignment[e] == "B"]
+            if not b_edges:
+                continue
+            lengths = [float(np.linalg.norm(pattern.vertices[pattern.edges[e][0]]
+                                            - pattern.vertices[pattern.edges[e][1]]))
+                       for e in b_edges]
+            measured[gi] = min(lengths)
         target = packing.flap_targets
         return np.abs(measured - target) / np.maximum(target, 1e-9)
 

@@ -417,12 +417,12 @@ def bake_animals(force=False):
 # design, not decoration.
 _DESIGN_CACHE = os.path.join(_HERE, "_designs_baked.json")
 
-# (tree key, studio label, folds-flat?) - three/four-flap fold flat end to end;
-# five-flap is the honest PARTIAL pentagon (documented in treemaker.py).
+# (tree key, studio label, folds-flat?) - all three fold flat end to end via the
+# one universal (gusset) molecule; five-flap is the pentagon it now resolves.
 DESIGN_SPECS = [
     ("three-flap", "Three-flap base", True),
     ("four-flap", "Four-flap base", True),
-    ("five-flap", "Five-flap base", False),
+    ("five-flap", "Five-flap base", True),
 ]
 
 _CP_COLORS = {"M": "#ff6b6b", "V": "#5b9bd5", "B": "#97a1b0", "F": "#5a6472"}

@@ -99,7 +99,8 @@ def multiflap_png(name, path):
                  color=_MV.get(kind, "#999"), lw=2.0 if kind in "MV" else 1.4)
     axc.plot(v[:, 0], v[:, 1], "o", color="black", ms=3)
     axc.set_aspect("equal"); axc.axis("off")
-    axc.set_title("incircle molecule\n(red=mountain, blue=valley, black=border)")
+    mol = "universal (gusset) molecule" if n > 1 else "incircle molecule"
+    axc.set_title(f"{mol}\n(red=mountain, blue=valley, black=border)")
     verdict = "FOLDS FLAT END TO END" if works else "PARTIAL (see docs)"
     box = (f"{name}\ninterior vertices: {n}\n"
            f"Kawasaki: {nk}/{n}   Maekawa: {nm}/{n}\n"
@@ -160,6 +161,8 @@ def main():
     base_png(packing, os.path.join(OUT, "treemaker_base.png"))
     merr, (mn, mnk, mnm), mworks = multiflap_png(
         "four-flap", os.path.join(OUT, "treemaker_multiflap.png"))
+    ferr, (fn, fnk, fnm), fworks = multiflap_png(
+        "five-flap", os.path.join(OUT, "treemaker_fiveflap.png"))
     bn, bnk, bnm = birdbase_png(os.path.join(OUT, "bird_base_crease.png"))
 
     print("three-flap base, end to end:")
@@ -172,6 +175,11 @@ def main():
     print(f"  Kawasaki        : {mnk}/{mn} interior vertices pass")
     print(f"  Maekawa         : {mnm}/{mn} interior vertices pass")
     print(f"  verdict         : {'FOLDS FLAT END TO END' if mworks else 'PARTIAL'}")
+    print("five-flap pentagon base — universal (gusset) molecule (treemaker_fiveflap.png):")
+    print(f"  flap len error  : max {ferr.max() * 100:.2f}%  mean {ferr.mean() * 100:.2f}%")
+    print(f"  Kawasaki        : {fnk}/{fn} interior vertices pass")
+    print(f"  Maekawa         : {fnm}/{fn} interior vertices pass")
+    print(f"  verdict         : {'FOLDS FLAT END TO END' if fworks else 'PARTIAL'}")
     print("canonical bird base (bird_base_crease.png):")
     print(f"  Kawasaki        : {bnk}/{bn} interior vertices pass")
     print(f"  Maekawa         : {bnm}/{bn} interior vertices pass")

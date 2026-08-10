@@ -265,6 +265,37 @@ const fs = require('fs');
   if (!(dRelief.z > 0.1)) await fail('four-flap base did not fold (z-relief ' + dRelief.z + ')');
   await page.screenshot({path: shotDesigner});
 
+  // ---- five-flap pentagon: the universal (gusset) molecule now folds it FLAT.
+  //      Assert its data marks folds-flat + passes Kawasaki+Maekawa, and it folds live.
+  const fiveInfo = await page.evaluate(() => {
+    const d = (DATA.designs || []).find(x => x.key === 'five-flap');
+    return d ? { ff: !!d.foldsFlat, kaw: d.kawasaki, mae: d.maekawa,
+                 flat: d.flatFoldable, flaps: d.flaps, iv: d.interiorVerts } : null;
+  });
+  if (!fiveInfo) await fail('five-flap design not present in DATA.designs');
+  if (!(fiveInfo.ff && fiveInfo.kaw && fiveInfo.mae && fiveInfo.flat))
+    await fail('five-flap not marked folds-flat / passing Kawasaki+Maekawa: ' + JSON.stringify(fiveInfo));
+  if (!(fiveInfo.flaps === 5 && fiveInfo.iv >= 5))
+    await fail('five-flap stats look wrong (expect 5 flaps, many interior verts): ' + JSON.stringify(fiveInfo));
+  const fiveClicked = await page.evaluate(() => {
+    for (const c of document.querySelectorAll('#designerlist .dcard'))
+      if (/Five-flap/i.test(c.textContent)) { c.querySelector('button.dload').click(); return true; }
+    return false;
+  });
+  if (!fiveClicked) await fail('five-flap "Fold this base" button not found');
+  await new Promise(r => setTimeout(r, 700));
+  const fiveStatus = await status();
+  if (!/^Folded .*Five-flap/.test(fiveStatus)) await fail('five-flap fold did not update status: ' + fiveStatus);
+  await setFold(1);
+  await new Promise(r => setTimeout(r, 1500));
+  const fiveRelief = await page.evaluate(() => {
+    const p = geo.attributes.position.array; let zmin = 1e9, zmax = -1e9;
+    for (let k = 2; k < p.length; k += 3) { if (p[k] < zmin) zmin = p[k]; if (p[k] > zmax) zmax = p[k]; }
+    return { z: zmax - zmin, dynamic: !!(S && S.dynamic) };
+  });
+  if (!fiveRelief.dynamic) await fail('five-flap did not load as a live .fold model');
+  if (!(fiveRelief.z > 0.1)) await fail('five-flap base did not fold (z-relief ' + fiveRelief.z + ')');
+
   // ---- canonical crane: the "Crane (bird base)" card must be the classic base,
   //      show its Kawasaki/Maekawa pass stats, and fold live (z-relief) ----
   const craneInfo = await page.evaluate(() => {

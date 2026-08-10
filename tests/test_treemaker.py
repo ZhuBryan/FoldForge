@@ -2,10 +2,10 @@
 
 Covers the packing (non-overlap, determinism, on-paper), the FOLD export round
 trip, and flat-foldability of the trees that fully fold flat - the 3-flap
-triangle *and* the 4-flap tangential quad, each of which now has a single
-interior vertex (the incircle-molecule incentre) passing Kawasaki + Maekawa with
-exact flap lengths. The 5-flap pentagon and the river tree are exercised as
-honest *partial* bases (see the module docstring).
+triangle, the 4-flap tangential quad *and* the 5-flap pentagon, all filled by the
+one universal (gusset) molecule so every interior vertex passes Kawasaki +
+Maekawa with exact flap lengths. Only the river tree (overlapping discs) is left
+as an honest *partial* base (see the module docstring).
 """
 
 import numpy as np
@@ -80,7 +80,7 @@ def test_four_flap_is_flat_foldable():
         assert v.maekawa is True
 
 
-@pytest.mark.parametrize("name", ["three-flap", "four-flap"])
+@pytest.mark.parametrize("name", ["three-flap", "four-flap", "five-flap"])
 def test_working_trees_fold_flat_with_exact_flaps(name):
     """The trees we claim work pass both theorems everywhere; flaps are exact."""
     ok, report, err = _fully_folds(name)
@@ -88,13 +88,32 @@ def test_working_trees_fold_flat_with_exact_flaps(name):
     assert err.max() < 1e-3, f"{name}: flap error {err.max():.4f}"
 
 
-@pytest.mark.parametrize("name", ["five-flap", "river-four"])
-def test_partial_trees_are_honestly_partial(name):
-    """Documented limits: the pentagon and the river tree do NOT fully fold.
+def test_five_flap_universal_molecule_folds_flat():
+    """The 5-flap pentagon folds flat via the universal (gusset) molecule.
 
-    They still pack and export; this pins the honest ceiling so a regression that
-    silently 'fixed' them (or broke the packing) would fail loudly.
+    This is the multi-flap case (n >= 5) that the per-triangle / single-incircle
+    molecules could not resolve: a non-tangential active polygon split by a gusset
+    into tangential parts. Every interior vertex must pass Kawasaki AND Maekawa,
+    and every flap length must be within 2% of its tree target.
     """
-    ok, report, err = _fully_folds(name)
-    assert not ok, f"{name}: unexpectedly fully foldable - update the docs/claims"
+    packing, pattern = design_base(get_tree("five-flap"))
+    report = foldability_report(pattern)
+    assert len(report.vertices) >= 5          # many interior vertices, not one incentre
+    assert report.flat_foldable
+    for v in report.vertices:
+        assert v.kawasaki is True, f"vertex {v.vertex} fails Kawasaki"
+        assert v.maekawa is True, f"vertex {v.vertex} fails Maekawa"
+    err = flap_length_errors(packing, pattern)
+    assert err.max() < 0.02, f"five-flap flap error {err.max():.4f}"
+    assert len(pattern.faces) > 0             # faces populated for the FOLD viewer
+
+
+def test_river_tree_is_honestly_partial():
+    """Documented limit: the river tree (overlapping discs) does NOT fully fold.
+
+    It still packs and exports; this pins the honest ceiling so a regression that
+    silently 'fixed' it (or broke the packing) would fail loudly.
+    """
+    ok, report, err = _fully_folds("river-four")
+    assert not ok, "river-four: unexpectedly fully foldable - update the docs/claims"
     assert len(report.vertices) > 0                 # it still builds a real pattern
