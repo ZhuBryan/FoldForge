@@ -24,6 +24,7 @@ const fs = require('fs');
   const shotEasy = path.join(__dirname, 'output', 'studio_difficulty_easy.png');
   const shotDetailed = path.join(__dirname, 'output', 'studio_difficulty_detailed.png');
   const shotDesigner = path.join(__dirname, 'output', 'studio_designer.png');
+  const shotCrane = path.join(__dirname, 'output', 'studio_crane.png');
   const setFold = f => page.evaluate(v => { const s = document.getElementById('slider'); s.value = v; s.dispatchEvent(new Event('input')); }, f);
   // panel-1 ("input photo") image source, as the browser resolves it
   const panelSrc = async () => page.evaluate(() => {
@@ -214,9 +215,42 @@ const fs = require('fs');
   if (!(dRelief.z > 0.1)) await fail('four-flap base did not fold (z-relief ' + dRelief.z + ')');
   await page.screenshot({path: shotDesigner});
 
+  // ---- canonical crane: the "Crane (bird base)" card must be the classic base,
+  //      show its Kawasaki/Maekawa pass stats, and fold live (z-relief) ----
+  const craneInfo = await page.evaluate(() => {
+    const d = (DATA.designs || []).find(x => x.key === 'bird-base');
+    return d ? { classic: !!d.classic, kaw: d.kawasaki, mae: d.maekawa,
+                 V: d.vertsN, E: d.edgesN, iv: d.interiorVerts, label: d.label } : null;
+  });
+  if (!craneInfo) await fail('bird-base design not present in DATA.designs');
+  if (!craneInfo.classic || !craneInfo.kaw || !craneInfo.mae)
+    await fail('bird-base not marked classic / not passing Kawasaki+Maekawa: ' + JSON.stringify(craneInfo));
+  const craneClicked = await page.evaluate(() => {
+    for (const c of document.querySelectorAll('#designerlist .dcard'))
+      if (/Crane \(bird base\)/i.test(c.textContent)) { c.querySelector('button.dload').click(); return true; }
+    return false;
+  });
+  if (!craneClicked) await fail('"Fold this crane base" button not found');
+  await new Promise(r => setTimeout(r, 700));
+  const craneStatus = await status();
+  if (!/^Folded .*Crane \(bird base\)/.test(craneStatus)) await fail('crane fold did not update status: ' + craneStatus);
+  if (!/traditional bird base/.test(craneStatus)) await fail('crane status missing bird-base note: ' + craneStatus);
+  if (!/Kawasaki\s+✓\s+Maekawa\s+✓/.test(craneStatus)) await fail('crane status missing Kawasaki/Maekawa pass stats: ' + craneStatus);
+  await setFold(1);
+  await new Promise(r => setTimeout(r, 1500));
+  const craneRelief = await page.evaluate(() => {
+    const p = geo.attributes.position.array; let zmin = 1e9, zmax = -1e9;
+    for (let k = 2; k < p.length; k += 3) { if (p[k] < zmin) zmin = p[k]; if (p[k] > zmax) zmax = p[k]; }
+    return { z: zmax - zmin, dynamic: !!(S && S.dynamic) };
+  });
+  if (!craneRelief.dynamic) await fail('crane did not load as a live .fold model');
+  if (!(craneRelief.z > 0.1)) await fail('crane base did not fold (z-relief ' + craneRelief.z + ')');
+  await page.screenshot({path: shotCrane});
+
   if (errs.length) await fail('uncaught page errors');
   console.log('OK — studio folds', path.basename(img),
     '| designer cards', dInfo.n, 'four-flap fold z-relief', dRelief.z.toFixed(2), '| designer shot', shotDesigner,
+    '| crane (bird base)', craneInfo.V + 'v/' + craneInfo.E + 'e,', 'Kaw/Mae ✓✓,', craneInfo.iv + ' interior, fold z-relief', craneRelief.z.toFixed(2), '| crane shot', shotCrane,
     '| 2-D Miura live fit', miGrid, 'grid,', miIters, 'iters, error', miErr, ',', miMs + 'ms, z-relief', meshOk.toFixed(2),
     '| live mirror-IoU', mirror, applied ? '(symmetrized)' : '(left as-is)',
     '| baked butterfly_sym IoU', gsym.iou, '| gallery cards', cards,

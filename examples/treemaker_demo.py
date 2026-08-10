@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from foldforge.design import (
-    get_tree, design_base, flap_length_errors, folded_schematic,
+    get_tree, design_base, flap_length_errors, folded_schematic, bird_base,
 )
 from foldforge.fabricate import to_svg
 from foldforge.geometry.foldability import foldability_report
@@ -113,6 +113,43 @@ def multiflap_png(name, path):
     return err, (n, nk, nm), works
 
 
+def birdbase_png(path):
+    """Proof panel for the canonical bird base: M/V crease pattern + pass counts.
+
+    Not circle-packed - the traditional, exact pattern (foldforge.design.classic),
+    so it folds flat by construction. We still run Kawasaki/Maekawa and annotate
+    the counts, and label it as the base (a finished crane needs extra folds).
+    """
+    pattern = bird_base()
+    report = foldability_report(pattern)
+    iv = pattern.interior_vertices()
+    n = len(iv)
+    nk = sum(1 for x in report.vertices if x.kawasaki)
+    nm = sum(1 for x in report.vertices if x.maekawa)
+
+    fig, ax = plt.subplots(figsize=(6.4, 6.4))
+    v = pattern.vertices
+    for (a, b), kind in zip(pattern.edges, pattern.assignment):
+        ax.plot([v[a, 0], v[b, 0]], [v[a, 1], v[b, 1]],
+                color=_MV.get(kind, "#999"), lw=2.4 if kind in "MV" else 1.6)
+    ax.plot(v[:, 0], v[:, 1], "o", color="black", ms=4)
+    for i in iv:                              # mark the interior vertices
+        ax.plot(v[i, 0], v[i, 1], "o", mfc="none", mec="#2ca02c", ms=13, mew=2)
+    ax.set_aspect("equal"); ax.axis("off")
+    ax.set_title("Traditional bird base — the classic crane starts here\n"
+                 "(red=mountain, blue=valley, black=border; green ring=interior vertex)")
+    box = (f"unit square, direct construction\n"
+           f"vertices/edges/faces: {pattern.n_vertices}/{pattern.n_edges}/{len(pattern.faces)}\n"
+           f"interior vertices: {n}\n"
+           f"Kawasaki: {nk}/{n}   Maekawa: {nm}/{n}\n"
+           f"FOLDS FLAT (base; crane adds head/tail folds)")
+    ax.text(0.5, -0.08, box, transform=ax.transAxes, ha="center", va="top",
+            fontsize=10, family="monospace",
+            bbox=dict(boxstyle="round", fc="#eaffea", ec="#2ca02c"))
+    fig.savefig(path, dpi=140, bbox_inches="tight"); plt.close(fig)
+    return (n, nk, nm)
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     packing, pattern, err, (n, nk, nm), _ = _stats("three-flap")
@@ -123,6 +160,7 @@ def main():
     base_png(packing, os.path.join(OUT, "treemaker_base.png"))
     merr, (mn, mnk, mnm), mworks = multiflap_png(
         "four-flap", os.path.join(OUT, "treemaker_multiflap.png"))
+    bn, bnk, bnm = birdbase_png(os.path.join(OUT, "bird_base_crease.png"))
 
     print("three-flap base, end to end:")
     print(f"  packing scale   : {packing.scale:.4f}")
@@ -134,7 +172,10 @@ def main():
     print(f"  Kawasaki        : {mnk}/{mn} interior vertices pass")
     print(f"  Maekawa         : {mnm}/{mn} interior vertices pass")
     print(f"  verdict         : {'FOLDS FLAT END TO END' if mworks else 'PARTIAL'}")
-    print(f"  wrote 5 files into {OUT}")
+    print("canonical bird base (bird_base_crease.png):")
+    print(f"  Kawasaki        : {bnk}/{bn} interior vertices pass")
+    print(f"  Maekawa         : {bnm}/{bn} interior vertices pass")
+    print(f"  wrote 6 files into {OUT}")
 
 
 if __name__ == "__main__":

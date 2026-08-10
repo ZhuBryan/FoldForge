@@ -172,6 +172,10 @@ def _design(args) -> None:
         _design_from_photo(args)
         return
 
+    if args.tree == "bird-base":
+        _design_bird_base(args)
+        return
+
     if not args.tree:
         raise SystemExit("give a built-in tree name or --from-photo IMG")
     tree = get_tree(args.tree)
@@ -190,6 +194,34 @@ def _design(args) -> None:
     print(f"  max flap error    : {err.max() * 100:.2f}%")
     print(f"  Kawasaki          : {n_kaw}/{n_int} interior vertices pass")
     print(f"  Maekawa           : {n_mae}/{n_int} interior vertices pass")
+
+
+def _design_bird_base(args) -> None:
+    """Export the canonical bird base (the crane's starting point) directly.
+
+    Not circle-packed: it is the traditional, exact crease pattern, so it folds
+    flat by construction. We still run the foldability checks and report them.
+    """
+    from foldforge.design import bird_base
+    from foldforge.geometry.foldability import foldability_report
+    from foldforge.fabricate import to_svg
+
+    pattern = bird_base()
+    if args.out.lower().endswith(".fold"):
+        write_fold(pattern, args.out)
+    else:
+        to_svg(pattern, args.out)
+    print(f"wrote {args.out}")
+    report = foldability_report(pattern)
+    n_int = len(report.vertices)
+    n_kaw = sum(1 for v in report.vertices if v.kawasaki)
+    n_mae = sum(1 for v in report.vertices if v.maekawa)
+    print(f"  traditional bird base — the classic crane starts here")
+    print(f"  vertices/edges/faces : {pattern.n_vertices}/{pattern.n_edges}/{len(pattern.faces)}")
+    print(f"  Kawasaki          : {n_kaw}/{n_int} interior vertices pass")
+    print(f"  Maekawa           : {n_mae}/{n_int} interior vertices pass")
+    print(f"  note: this is the base; a finished crane needs extra head/tail "
+          "reverse folds beyond it")
 
 
 def _design_from_photo(args) -> None:
@@ -358,7 +390,8 @@ def main(argv: list[str] | None = None) -> None:
     from foldforge.design import BUILTIN_TREES
     p.add_argument("tree", nargs="?", default=None,
                    help="built-in tree: " + ", ".join(BUILTIN_TREES)
-                        + " (omit when using --from-photo)")
+                        + ", or 'bird-base' (the canonical crane starting point,"
+                        + " constructed directly) (omit when using --from-photo)")
     p.add_argument("out", help="output .svg (crease pattern) or .fold")
     p.add_argument("--from-photo", metavar="IMG", default=None,
                    help="photo -> silhouette -> medial-axis stick tree -> base "

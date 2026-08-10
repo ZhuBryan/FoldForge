@@ -481,12 +481,51 @@ def _bake_one_design(key, label, folds_flat):
     }
 
 
+def _bake_bird_base():
+    """Bake the canonical crane starting point: the traditional bird base.
+
+    Unlike the circle-packed designs this is constructed *directly* from its known
+    crease pattern (foldforge.design.classic.bird_base), so it folds flat by
+    construction; we still run the real Kawasaki/Maekawa checks and report them.
+    """
+    from foldforge.design import bird_base
+    from foldforge.geometry.foldability import foldability_report
+    pattern = bird_base()
+    report = foldability_report(pattern)
+    kawasaki = all(v.kawasaki is not False for v in report.vertices)
+    maekawa = all(v.maekawa is not False for v in report.vertices)
+    fold = {
+        "file_spec": 1.1, "file_creator": "FoldForge",
+        "frame_classes": ["creasePattern"], "frame_attributes": ["2D"],
+        "vertices_coords": [[round(float(x), 6) for x in p]
+                            for p in pattern.vertices.tolist()],
+        "edges_vertices": [[int(a), int(b)] for a, b in pattern.edges.tolist()],
+        "edges_assignment": [str(a).upper() for a in pattern.assignment],
+        "faces_vertices": [[int(i) for i in f] for f in pattern.faces],
+        "metadata": {"name": "FoldForge bird base"},
+    }
+    return {
+        "key": "bird-base", "label": "Crane (bird base)",
+        "classic": True, "foldsFlat": True, "flaps": 4,
+        "kawasaki": bool(kawasaki), "maekawa": bool(maekawa),
+        "flatFoldable": bool(report.flat_foldable),
+        "interiorVerts": int(len(report.vertices)),
+        "vertsN": int(pattern.n_vertices), "edgesN": int(pattern.n_edges),
+        "facesN": int(len(pattern.faces)),
+        "note": "Traditional bird base — the classic crane starts here",
+        "cp": _cp_svg(pattern),
+        "fold": fold,
+    }
+
+
 def bake_designs(force=False):
     """Bake the TreeMaker-lite figurative bases (needs SciPy). Cached to JSON."""
     if os.path.exists(_DESIGN_CACHE) and not force:
         with open(_DESIGN_CACHE, "r", encoding="utf-8") as f:
             return json.load(f)
-    designs = [_bake_one_design(*spec) for spec in DESIGN_SPECS]
+    # The canonical bird base first (it needs no SciPy), then the packed bases.
+    designs = [_bake_bird_base()]
+    designs += [_bake_one_design(*spec) for spec in DESIGN_SPECS]
     with open(_DESIGN_CACHE, "w", encoding="utf-8") as f:
         json.dump(designs, f, separators=(",", ":"))
     return designs
@@ -1388,15 +1427,22 @@ buildGallery();
 // PBD viewer .fold uploads use, so the design folds live; the flat crease
 // pattern (M red / V blue / B grey) and real stats show alongside it.
 function foldDesign(d){
-  const shape=buildFoldShape(d.fold); shape.label=d.label+' — circle-packed base, folding live';
+  const kind=d.classic?'traditional bird base, folding live':'circle-packed base, folding live';
+  const shape=buildFoldShape(d.fold); shape.label=d.label+' — '+kind;
   DATA.shapes['__design']=shape;
   if(!DATA.order.includes('__design')){DATA.order.push('__design'); const o=document.createElement('option');o.value='__design';o.textContent=shape.label;sel.appendChild(o);}
   else{const ex=[...sel.options].find(o=>o.value==='__design'); if(ex)ex.textContent=shape.label;}
   sel.value='__design'; buildShape('__design'); t=0;dir=1;playing=true;play.innerHTML='&#10073;&#10073; Pause fold';
   const th=(v)=>v?'✓':'✗';
-  setStatus('Folded '+d.label+' — circle-packing (TreeMaker) base · '+d.flaps+' flaps · '
-    +(d.foldsFlat?'folds flat':'partial fold')+' · Kawasaki '+th(d.kawasaki)+' Maekawa '+th(d.maekawa)
-    +' · flap-length error '+d.flapErr.toFixed(2)+'%','ok');
+  if(d.classic){
+    setStatus('Folded '+d.label+' — traditional bird base · '+d.vertsN+' vertices · '
+      +d.edgesN+' creases · Kawasaki '+th(d.kawasaki)+' Maekawa '+th(d.maekawa)
+      +' ('+d.interiorVerts+'/'+d.interiorVerts+' interior vertices) · the classic crane starts here','ok');
+  } else {
+    setStatus('Folded '+d.label+' — circle-packing (TreeMaker) base · '+d.flaps+' flaps · '
+      +(d.foldsFlat?'folds flat':'partial fold')+' · Kawasaki '+th(d.kawasaki)+' Maekawa '+th(d.maekawa)
+      +' · flap-length error '+d.flapErr.toFixed(2)+'%','ok');
+  }
 }
 function buildDesigns(){
   const list=document.getElementById('designerlist'); const designs=DATA.designs||[];
@@ -1404,13 +1450,24 @@ function buildDesigns(){
   designs.forEach(d=>{const card=document.createElement('div'); card.className='dcard';
     const im=document.createElement('img'); im.src=d.cp; im.alt=d.label+' crease pattern';
     const meta=document.createElement('div'); meta.className='dmeta';
-    const badge=d.foldsFlat?'<span class="badge flat">folds flat</span>':'<span class="badge partial">partial</span>';
+    const badge=d.classic?'<span class="badge flat">classic · folds flat</span>'
+      :(d.foldsFlat?'<span class="badge flat">folds flat</span>':'<span class="badge partial">partial</span>');
     const th=(v)=>v?'✓':'✗';
-    meta.innerHTML='<b>'+d.label+'</b>'+badge
-      +'<div class="dstat">'+d.flaps+' flaps · flap error '+d.flapErr.toFixed(2)+'%</div>'
-      +'<div class="dstat">Kawasaki '+th(d.kawasaki)+' · Maekawa '+th(d.maekawa)
-      +(d.foldsFlat?'':' · non-tangent diagonal unresolved')+'</div>';
-    const btn=document.createElement('button'); btn.className='dload'; btn.textContent='Fold this base';
+    if(d.classic){
+      meta.innerHTML='<b>'+d.label+'</b>'+badge
+        +'<div class="dstat">'+d.note+'</div>'
+        +'<div class="dstat">'+d.vertsN+' vertices · '+d.edgesN+' creases · '+d.facesN+' faces</div>'
+        +'<div class="dstat">Kawasaki '+th(d.kawasaki)+' · Maekawa '+th(d.maekawa)
+        +' ('+d.interiorVerts+'/'+d.interiorVerts+' interior vertices)</div>'
+        +'<div class="dstat" style="opacity:.75">the base — a finished crane adds head/tail reverse folds</div>';
+    } else {
+      meta.innerHTML='<b>'+d.label+'</b>'+badge
+        +'<div class="dstat">'+d.flaps+' flaps · flap error '+d.flapErr.toFixed(2)+'%</div>'
+        +'<div class="dstat">Kawasaki '+th(d.kawasaki)+' · Maekawa '+th(d.maekawa)
+        +(d.foldsFlat?'':' · non-tangent diagonal unresolved')+'</div>';
+    }
+    const btn=document.createElement('button'); btn.className='dload';
+    btn.textContent=d.classic?'Fold this crane base':'Fold this base';
     btn.addEventListener('click',()=>foldDesign(d));
     meta.appendChild(btn); card.appendChild(im); card.appendChild(meta); list.appendChild(card);
   });
