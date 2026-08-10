@@ -25,6 +25,8 @@ const fs = require('fs');
   const shotDetailed = path.join(__dirname, 'output', 'studio_difficulty_detailed.png');
   const shotDesigner = path.join(__dirname, 'output', 'studio_designer.png');
   const shotCrane = path.join(__dirname, 'output', 'studio_crane.png');
+  const shotGrouped = path.join(__dirname, 'output', 'studio_grouped_controls.png');
+  const shotWalk = path.join(__dirname, 'output', 'studio_walkthrough.png');
   const setFold = f => page.evaluate(v => { const s = document.getElementById('slider'); s.value = v; s.dispatchEvent(new Event('input')); }, f);
   // panel-1 ("input photo") image source, as the browser resolves it
   const panelSrc = async () => page.evaluate(() => {
@@ -38,12 +40,37 @@ const fs = require('fs');
   await page.setViewport({width: 1280, height: 800});
   const errs = [];
   page.on('pageerror', e => errs.push(e.message));
-  await page.goto(html);
+  await page.goto(html + '?tour=0');   // ?tour=0 suppresses the first-run walkthrough auto-open so it never blocks assertions
   await new Promise(r => setTimeout(r, 2000));
   const status = async () => page.evaluate(() => document.getElementById('status').textContent);
   const fail = async (msg) => { console.error('FAIL:', msg, '| status:', await status(), '| pageerrors:', errs); await browser.close(); process.exit(1); };
 
   if (!/Ready/.test(await status())) await fail('page did not become Ready');
+
+  // ---- grouped control bar: the three labeled clusters are present, tour dismissed ----
+  const groups = await page.evaluate(() => [...document.querySelectorAll('#ui .ctlgroup .glabel')].map(e => e.textContent.trim()));
+  if (groups.length !== 3) await fail('control bar not grouped into 3 clusters: ' + JSON.stringify(groups));
+  await page.screenshot({path: shotGrouped});
+
+  // ---- first-run walkthrough: opens from the "? Tour" button, shows step 1, highlights a
+  //      control on the next step, then closes on Esc (and stays out of the way afterward) ----
+  await page.click('#tourBtn');
+  await new Promise(r => setTimeout(r, 300));
+  const tourStep1 = await page.evaluate(() => ({
+    open: getComputedStyle(document.getElementById('tour')).display !== 'none',
+    title: document.getElementById('tourTitle').textContent,
+  }));
+  if (!tourStep1.open) await fail('walkthrough did not open on "? Tour" button');
+  if (!/FoldForge/i.test(tourStep1.title)) await fail('walkthrough step 1 missing welcome text: ' + tourStep1.title);
+  await page.click('#tourNext');   // step 2 highlights the Gallery control (visible ring)
+  await new Promise(r => setTimeout(r, 300));
+  const ringVisible = await page.evaluate(() => parseFloat(getComputedStyle(document.getElementById('tourRing')).width) > 0);
+  if (!ringVisible) await fail('walkthrough step 2 did not highlight a control');
+  await page.screenshot({path: shotWalk});
+  await page.keyboard.press('Escape');
+  await new Promise(r => setTimeout(r, 200));
+  const tourClosed = await page.evaluate(() => getComputedStyle(document.getElementById('tour')).display === 'none');
+  if (!tourClosed) await fail('walkthrough did not close on Esc');
 
   // ---- photo upload with Symmetry = Auto (default) on the butterfly sample ----
   await page.select('#symmode', 'auto');
@@ -259,6 +286,6 @@ const fs = require('fs');
     '| flat-sheet rag L/R', rect.leftRag.toFixed(3) + '/' + rect.rightRag.toFixed(3), '(ragged flat OK)',
     '| baked-sample Detail: Detailed', detFolds, 'folds/' + detGeom.verts + 'v/' + detGeom.tris + 't ->',
     'Easy', easyFolds, 'folds/' + easyGeom.verts + 'v/' + easyGeom.tris + 't',
-    '| screenshots', shot, shotUpload, shotGallery, shotRectFlat, shotRectFolded, shotDetailed, shotEasy, '|', await status());
+    '| screenshots', shot, shotUpload, shotGallery, shotRectFlat, shotRectFolded, shotDetailed, shotEasy, shotGrouped, shotWalk, '|', await status());
   await browser.close();
 })().catch(e => { console.error('FAIL:', e.message); process.exit(1); });

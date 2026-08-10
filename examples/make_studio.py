@@ -610,8 +610,26 @@ HTML = r"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
  .badge.flat{background:#25422f;color:#7fd39a}.badge.partial{background:#4a3a25;color:#e0b877}
  .dstat{color:#9aa4b2;margin:2px 0}
  button.dload{margin-top:5px;padding:5px 10px;font-size:12px}
+ /* control bar grouped into three labeled clusters (choose -> settings -> view/export) */
+ .ctlgroup{display:flex;flex-direction:column;gap:6px;background:rgba(18,23,32,.55);border:1px solid #2a3140;border-radius:10px;padding:6px 10px 8px}
+ .ctlgroup.grow{flex:1 1 340px}
+ .glabel{font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:#8b95a4;padding:0 2px;white-space:nowrap}
+ .ctlrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+ /* first-run guided walkthrough (coach marks) */
+ #tour{position:fixed;inset:0;z-index:80;display:none}
+ #tourDim{position:absolute;inset:0;background:transparent}
+ #tourRing{position:absolute;border:2px solid #d9a441;border-radius:10px;box-shadow:0 0 0 9999px rgba(8,10,14,.62);pointer-events:none;
+   transition:top .2s,left .2s,width .2s,height .2s}
+ #tourCard{position:absolute;max-width:280px;background:#1b2230;border:1px solid #3a4456;border-radius:12px;padding:13px 15px;
+   box-shadow:0 10px 34px rgba(0,0,0,.55);font-size:13.5px;line-height:1.5}
+ #tourCard h4{margin:0 0 5px;font-size:14.5px;color:#f0d9a8}
+ #tourCard .trow{display:flex;gap:8px;align-items:center;margin-top:11px}
+ #tourCard .tstep{font-size:11px;color:#8b95a4;flex:1}
+ #tourCard button{padding:5px 11px;font-size:13px}
+ #tourBtn{background:#1f2531;color:#e9e4d7;border:1px solid #39414f;border-radius:7px;padding:2px 9px;cursor:pointer;font-size:12px;margin-left:8px}
+ #tourBtn:hover{background:#2a3140}
 </style></head><body>
-<div id="hud"><b>FoldForge Studio</b><br><small>drag rotate &middot; scroll zoom &middot; pick a shape and fold it, or fold your own image</small></div>
+<div id="hud"><b>FoldForge Studio</b> <button id="tourBtn" title="Replay the guided walkthrough">? Tour</button><br><small>drag rotate &middot; scroll zoom &middot; pick a shape and fold it, or fold your own image</small></div>
 <div class="legend"><span class="m">&#9632;</span>mountain <span class="v">&#9632;</span>valley <span class="t">&#9472;</span>target<br><small>exact rigid fold kinematics</small></div>
 <div id="cap"></div>
 <div id="pipeline">
@@ -627,46 +645,57 @@ HTML = r"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
  <div class="dnote">Circle-packing (TreeMaker) method: each stick figure&rsquo;s limbs become flaps of a uniaxial base. Fold a base to see the crease pattern fold live.</div>
  <div id="designerlist"></div></div>
 <div id="status"></div>
+<div id="tour"><div id="tourDim"></div><div id="tourRing"></div>
+ <div id="tourCard"><h4 id="tourTitle"></h4><div id="tourText"></div>
+  <div class="trow"><span class="tstep" id="tourStep"></span>
+   <button id="tourBack">Back</button><button id="tourSkip">Skip</button>
+   <button id="tourNext" class="on">Next</button></div></div></div>
 <div id="ui">
- <select id="shape" title="Pick a built-in shape or a baked sample to fold. Uploaded photos and opened .fold files also appear in this list."></select>
- <select id="detail" title="How hard the folded pattern is to make by hand: Easy/Medium are foldable by hand (tens of creases); Detailed/Extra are dense relief only a machine reproduces cleanly.">
-  <option value="10">Easy (~9 folds, by hand)</option>
-  <option value="16">Medium (~15 folds, by hand)</option>
-  <option value="24" selected>Detailed (~23 folds, machine)</option>
-  <option value="36">Extra (~35 folds, machine)</option>
- </select>
- <select id="foldmode" title="Fold every crease together, or one crease after another like instructions">
-  <option value="all" selected>Fold: all at once</option>
-  <option value="step">Fold: step by step</option>
- </select>
- <select id="shapemode" title="3D subject: segment the subject and fold its inflated silhouette. Brightness: fold the raw luminance of the whole frame.">
-  <option value="subject" selected>Shape: 3D subject</option>
-  <option value="bright">Shape: brightness relief</option>
- </select>
- <select id="symmode" title="Bilateral symmetry for a folded photo subject. Auto applies only when the mirror overlap (IoU) is at least 0.80; Force always applies; Off keeps the raw silhouette.">
-  <option value="off">Symmetry: Off</option>
-  <option value="auto" selected>Symmetry: Auto</option>
-  <option value="force">Symmetry: Force</option>
- </select>
- <select id="enginemode" title="Corrugation: fast 1-D pleat chain per row (a ridge). 2-D Miura: run a live, coarse warped-Miura fit on your photo's height field (a genuine 2-D folded surface) — slower, capped grid + iterations; the offline Python engine is higher quality.">
-  <option value="corrugation" selected>Engine: Corrugation (fast)</option>
-  <option value="miura">Engine: 2-D Miura (live fit)</option>
- </select>
- <!-- actions -->
- <button id="uploadBtn" title="Upload a photo (JPG or PNG) and fold it into a 3D relief. You can also drag an image anywhere onto the page.">&#128247; Upload photo</button>
- <input id="imgfile" type="file" accept="image/*" style="display:none">
- <button id="foldBtn" title="Open a FOLD crease-pattern file (.fold) and animate its fold.">&#128193; Open .fold</button>
- <input id="foldfile" type="file" accept=".fold,application/json" style="display:none">
- <button id="dl" title="Download the current folded frame as a Wavefront .obj mesh.">&#11015; Export OBJ</button>
- <!-- panel / appearance toggles (green = on) -->
- <button id="texBtn" title="Texture the folded sheet with the source photo, or show blank paper. The reference photo always stays in its own panel.">&#128444;&#65039; Texture: Paper</button>
- <button id="heatBtn" class="on" title="Show or hide the photo pipeline strip (input &rarr; height field &rarr; symmetrized). Green = shown.">&#128200; Pipeline</button>
- <button id="galleryBtn" title="Show or hide the showcase gallery of baked sample results. Green = shown.">&#127912; Gallery</button>
- <button id="designBtn" title="Show or hide the figurative designer: circle-packing (TreeMaker) bases you can fold live. Green = shown.">&#129529; Design a figure</button>
- <!-- playback -->
- <button id="play" title="Play or pause the folding animation.">&#10073;&#10073; Pause fold</button>
- <label class="fold">fold <input id="slider" type="range" min="0" max="1" step="0.001" value="0"></label>
- <span id="pct">0%</span>
+ <!-- 1: choose what to fold -->
+ <div class="ctlgroup"><span class="glabel">1 &middot; Choose what to fold</span><div class="ctlrow">
+  <select id="shape" title="Pick a built-in shape or a baked sample to fold. Uploaded photos and opened .fold files also appear in this list."></select>
+  <button id="uploadBtn" title="Upload a photo (JPG or PNG) and fold it into a 3D relief. You can also drag an image anywhere onto the page.">&#128247; Upload photo</button>
+  <input id="imgfile" type="file" accept="image/*" style="display:none">
+  <button id="foldBtn" title="Open a FOLD crease-pattern file (.fold) and animate its fold.">&#128193; Open .fold</button>
+  <input id="foldfile" type="file" accept=".fold,application/json" style="display:none">
+  <button id="galleryBtn" title="Show or hide the showcase gallery of baked sample results. Green = shown.">&#127912; Gallery</button>
+  <button id="designBtn" title="Show or hide the figurative designer: circle-packing (TreeMaker) bases you can fold live. Green = shown.">&#129529; Design a figure</button>
+ </div></div>
+ <!-- 2: fold settings -->
+ <div class="ctlgroup"><span class="glabel">2 &middot; Fold settings</span><div class="ctlrow">
+  <select id="enginemode" title="Corrugation: fast 1-D pleat chain per row (a ridge). 2-D Miura: run a live, coarse warped-Miura fit on your photo's height field (a genuine 2-D folded surface) — slower, capped grid + iterations; the offline Python engine is higher quality.">
+   <option value="corrugation" selected>Engine: Corrugation (fast)</option>
+   <option value="miura">Engine: 2-D Miura (live fit)</option>
+  </select>
+  <select id="detail" title="How hard the folded pattern is to make by hand: Easy/Medium are foldable by hand (tens of creases); Detailed/Extra are dense relief only a machine reproduces cleanly.">
+   <option value="10">Easy (~9 folds, by hand)</option>
+   <option value="16">Medium (~15 folds, by hand)</option>
+   <option value="24" selected>Detailed (~23 folds, machine)</option>
+   <option value="36">Extra (~35 folds, machine)</option>
+  </select>
+  <select id="shapemode" title="3D subject: segment the subject and fold its inflated silhouette. Brightness: fold the raw luminance of the whole frame.">
+   <option value="subject" selected>Shape: 3D subject</option>
+   <option value="bright">Shape: brightness relief</option>
+  </select>
+  <select id="symmode" title="Bilateral symmetry for a folded photo subject. Auto applies only when the mirror overlap (IoU) is at least 0.80; Force always applies; Off keeps the raw silhouette.">
+   <option value="off">Symmetry: Off</option>
+   <option value="auto" selected>Symmetry: Auto</option>
+   <option value="force">Symmetry: Force</option>
+  </select>
+  <select id="foldmode" title="Fold every crease together, or one crease after another like instructions">
+   <option value="all" selected>Fold: all at once</option>
+   <option value="step">Fold: step by step</option>
+  </select>
+ </div></div>
+ <!-- 3: view & export -->
+ <div class="ctlgroup grow"><span class="glabel">3 &middot; View &amp; export</span><div class="ctlrow">
+  <button id="play" title="Play or pause the folding animation.">&#10073;&#10073; Pause fold</button>
+  <label class="fold">fold <input id="slider" type="range" min="0" max="1" step="0.001" value="0"></label>
+  <span id="pct">0%</span>
+  <button id="heatBtn" class="on" title="Show or hide the photo pipeline strip (input &rarr; height field &rarr; symmetrized). Green = shown.">&#128200; Pipeline</button>
+  <button id="texBtn" title="Texture the folded sheet with the source photo, or show blank paper. The reference photo always stays in its own panel.">&#128444;&#65039; Texture: Paper</button>
+  <button id="dl" title="Download the current folded frame as a Wavefront .obj mesh.">&#11015; Export OBJ</button>
+ </div></div>
 </div>
 <script>__THREE__</script>
 <script>
@@ -1549,6 +1578,58 @@ try{
   setFrame(0.5); setFrame(0);
   setStatus('Ready \u2014 drop a photo anywhere, or pick a shape','ok');
 }catch(err){ setStatus('Startup self-test failed: '+((err&&err.message)||err),'err'); throw err; }
+// ---- first-run guided walkthrough (coach marks; self-contained, no libraries) ----
+const TOUR=[
+ {sel:null,title:'Welcome to FoldForge',text:'FoldForge folds a photo or a shape into a real 3-D origami model — right here in your browser.'},
+ {sel:'#galleryBtn',title:'Pick something to fold',text:'Open the gallery for ready-made samples, or use “Upload photo” to fold your own image.'},
+ {sel:'#slider',title:'Drag to fold it into 3-D',text:'Slide here (or press Play) to fold the flat sheet up into 3-D. Drag the model to rotate, scroll to zoom.'},
+ {sel:'#detail',title:'How hand-foldable?',text:'Choose the crease budget: Easy/Medium fold by hand; Detailed/Extra are machine-dense relief.'},
+ {sel:'#designBtn',title:'Design classic bases',text:'Open “Design a figure” to fold classic origami bases like the crane, live.'},
+ {sel:null,title:'You’re all set',text:'Replay this tour any time with the “? Tour” button at the top-left.'},
+];
+const tourEl=document.getElementById('tour'),tourRing=document.getElementById('tourRing'),
+      tourCard=document.getElementById('tourCard'),tourTitle=document.getElementById('tourTitle'),
+      tourText=document.getElementById('tourText'),tourStepEl=document.getElementById('tourStep'),
+      tourBackB=document.getElementById('tourBack'),tourNextB=document.getElementById('tourNext'),
+      tourSkipB=document.getElementById('tourSkip'),tourBtn=document.getElementById('tourBtn');
+let tourIdx=0;
+// "seen" persists in localStorage (guarded so a standalone file:// page never throws);
+// a ?tour=0 query param also suppresses the auto-open so automation isn't blocked.
+function tourSeen(){ try{ if(localStorage.getItem('ff_tour_seen')==='1') return true; }catch(e){} return /[?&]tour=0/.test(location.search); }
+function tourMarkSeen(){ try{ localStorage.setItem('ff_tour_seen','1'); }catch(e){} }
+function showTourStep(i){
+  tourIdx=Math.max(0,Math.min(TOUR.length-1,i)); const s=TOUR[tourIdx];
+  tourTitle.textContent=s.title; tourText.textContent=s.text;
+  tourStepEl.textContent=(tourIdx+1)+' / '+TOUR.length;
+  tourBackB.style.visibility=tourIdx?'visible':'hidden';
+  tourNextB.textContent=(tourIdx===TOUR.length-1)?'Done':'Next';
+  const el=s.sel&&document.querySelector(s.sel), r=el&&el.getBoundingClientRect();
+  tourCard.style.display='block';
+  if(r&&r.width){ const pad=6;
+    tourRing.style.left=(r.left-pad)+'px'; tourRing.style.top=(r.top-pad)+'px';
+    tourRing.style.width=(r.width+2*pad)+'px'; tourRing.style.height=(r.height+2*pad)+'px';
+    const cw=280, below=r.top<170;                       // card above the target, or below if it's near the top
+    tourCard.style.transform='none'; tourCard.style.right='auto';
+    tourCard.style.left=Math.min(Math.max(8,r.left),innerWidth-cw-8)+'px';
+    if(below){ tourCard.style.top=(r.bottom+12)+'px'; tourCard.style.bottom='auto'; }
+    else { tourCard.style.bottom=(innerHeight-r.top+12)+'px'; tourCard.style.top='auto'; }
+  } else {                                                // welcome / done: dim all, centre the card
+    tourRing.style.left=(innerWidth/2)+'px'; tourRing.style.top=(innerHeight/2)+'px';
+    tourRing.style.width='0px'; tourRing.style.height='0px';
+    tourCard.style.left='50%'; tourCard.style.right='auto';
+    tourCard.style.top='50%'; tourCard.style.bottom='auto'; tourCard.style.transform='translate(-50%,-50%)';
+  }
+}
+function startTour(i){ tourEl.style.display='block'; showTourStep(i||0); }
+function endTour(){ tourEl.style.display='none'; tourMarkSeen(); }
+tourNextB.addEventListener('click',()=>{ if(tourIdx>=TOUR.length-1) endTour(); else showTourStep(tourIdx+1); });
+tourBackB.addEventListener('click',()=>showTourStep(tourIdx-1));
+tourSkipB.addEventListener('click',endTour);
+document.getElementById('tourDim').addEventListener('click',endTour);   // click outside the card dismisses
+tourBtn.addEventListener('click',()=>startTour(0));
+addEventListener('keydown',e=>{ if(tourEl.style.display!=='block')return;
+  if(e.key==='Escape')endTour(); else if(e.key==='ArrowRight')tourNextB.click(); else if(e.key==='ArrowLeft'&&tourIdx)showTourStep(tourIdx-1); });
+if(!tourSeen()) startTour(0);
 function loop(){requestAnimationFrame(loop);
   if(playing){t+=dir*0.006; if(t>=1){t=1;dir=-1} if(t<=0){t=0;dir=1} slider.value=t;}
   pct.textContent=Math.round(t*100)+'%'; setFrame(t); pivot.rotation.set(rx,0,rz); renderer.render(scene,camera);}
