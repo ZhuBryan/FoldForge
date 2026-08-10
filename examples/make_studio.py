@@ -1164,14 +1164,19 @@ function buildMiuraShape(img,nx,ny,mode,seg){
   for(let n=0;n<N;n++){const x=P[n*3],y=P[n*3+1],z=P[n*3+2];
     if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;if(z<z0)z0=z;if(z>z1)z1=z;}
   const sx=length/((x1-x0)+1e-9), sy=width/((y1-y0)+1e-9), sz=height/((z1-z0)+1e-9);
-  const V0=[];   // folded vertices, centred
   let cx=0,cy=0,cz=0;
   const vx=new Float64Array(N),vy=new Float64Array(N),vz=new Float64Array(N);
   for(let n=0;n<N;n++){vx[n]=(P[n*3]-x0)*sx; vy[n]=(P[n*3+1]-y0)*sy; vz[n]=(P[n*3+2]-z0)*sz; cx+=vx[n];cy+=vy[n];cz+=vz[n];}
   cx/=N;cy/=N;cz/=N;
-  const NF=20, frames=[];   // flat plane -> folded relief (z rises with the fold fraction)
-  for(let fi=0;fi<NF;fi++){const f=0.04+(1-0.04)*fi/(NF-1),Vf=[];
-    for(let n=0;n<N;n++)Vf.push([vx[n]-cx, vy[n]-cy, (vz[n]-cz)*f]);
+  // flat crease pattern Q (z=0), scaled by the SAME sx,sy so it is the isometric UNFOLD of P.
+  // Q's footprint is larger, so lerping Q->P contracts the footprint and forms the creases: a real fold, not a z-morph.
+  const Q=fit.Q; let qx0=1e18,qy0=1e18; for(let n=0;n<N;n++){if(Q[n*3]<qx0)qx0=Q[n*3]; if(Q[n*3+1]<qy0)qy0=Q[n*3+1];}
+  let qcx=0,qcy=0; const qx=new Float64Array(N),qy=new Float64Array(N);
+  for(let n=0;n<N;n++){qx[n]=(Q[n*3]-qx0)*sx; qy[n]=(Q[n*3+1]-qy0)*sy; qcx+=qx[n];qcy+=qy[n];}
+  qcx/=N;qcy/=N;
+  const NF=20, frames=[];   // t=0: flat crease pattern Q -> t=1: folded surface P, per-vertex lerp (footprint contracts as it folds)
+  for(let fi=0;fi<NF;fi++){const f=fi/(NF-1),Vf=[];
+    for(let n=0;n<N;n++)Vf.push([(qx[n]-qcx)*(1-f)+(vx[n]-cx)*f, (qy[n]-qcy)*(1-f)+(vy[n]-cy)*f, (vz[n]-cz)*f]);
     frames.push(Vf);}
   const idx=(j,i)=>j*C+i, tris=[];
   for(let j=0;j<R-1;j++)for(let i=0;i<C-1;i++) tris.push([idx(j,i),idx(j,i+1),idx(j+1,i+1)],[idx(j,i),idx(j+1,i+1),idx(j+1,i)]);

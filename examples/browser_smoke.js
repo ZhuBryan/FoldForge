@@ -21,6 +21,8 @@ const fs = require('fs');
   const shotRectFlat = path.join(__dirname, 'output', 'studio_rect_flat.png');
   const shotRectFolded = path.join(__dirname, 'output', 'studio_rect_folded.png');
   const shotMiura = path.join(__dirname, 'output', 'studio_live_miura.png');
+  const shotMiuraFlat = path.join(__dirname, 'output', 'miura_flat.png');
+  const shotMiuraFolded = path.join(__dirname, 'output', 'miura_folded.png');
   const shotEasy = path.join(__dirname, 'output', 'studio_difficulty_easy.png');
   const shotDetailed = path.join(__dirname, 'output', 'studio_difficulty_detailed.png');
   const shotDesigner = path.join(__dirname, 'output', 'studio_designer.png');
@@ -209,6 +211,27 @@ const fs = require('fs');
   await page.screenshot({path: shotMiura});
   const miGrid = mi[1] + '×' + mi[2], miIters = mi[3], miErr = mi[4], miMs = mi[5];
 
+  // ---- PROVE it FOLDS (not a z-morph): the XY footprint must CONTRACT and the z-relief
+  //      GROW as the slider rises from t=0 (flat crease pattern) to t=1 (folded surface) ----
+  const foot = () => page.evaluate(() => {
+    const p = geo.attributes.position.array;
+    let X0 = 1e9, X1 = -1e9, Y0 = 1e9, Y1 = -1e9, Z0 = 1e9, Z1 = -1e9;
+    for (let k = 0; k < p.length; k += 3) { const x = p[k], y = p[k+1], z = p[k+2];
+      if (x < X0) X0 = x; if (x > X1) X1 = x; if (y < Y0) Y0 = y; if (y > Y1) Y1 = y; if (z < Z0) Z0 = z; if (z > Z1) Z1 = z; }
+    return { xspan: X1 - X0, area: (X1 - X0) * (Y1 - Y0), zrelief: Z1 - Z0 };
+  });
+  await setFold(0);   await new Promise(r => setTimeout(r, 500)); const m0 = await foot();
+  await page.screenshot({path: shotMiuraFlat});
+  await setFold(0.5); await new Promise(r => setTimeout(r, 500)); const m5 = await foot();
+  await setFold(1);   await new Promise(r => setTimeout(r, 500)); const m1 = await foot();
+  await page.screenshot({path: shotMiuraFolded});
+  if (!(m1.area < m0.area && m5.area < m0.area))
+    await fail('2-D Miura footprint did not contract as it folds (area t0/t.5/t1 ' + m0.area.toFixed(2) + '/' + m5.area.toFixed(2) + '/' + m1.area.toFixed(2) + ')');
+  if (!(m5.zrelief > m0.zrelief && m1.zrelief > m5.zrelief))
+    await fail('2-D Miura z-relief did not grow as it folds (t0/t.5/t1 ' + m0.zrelief.toFixed(3) + '/' + m5.zrelief.toFixed(3) + '/' + m1.zrelief.toFixed(3) + ')');
+  const miFold = 'footprint area ' + m0.area.toFixed(1) + '->' + m5.area.toFixed(1) + '->' + m1.area.toFixed(1)
+    + ' (x-span ' + m0.xspan.toFixed(1) + '->' + m1.xspan.toFixed(1) + '), z-relief ' + m0.zrelief.toFixed(2) + '->' + m5.zrelief.toFixed(2) + '->' + m1.zrelief.toFixed(2);
+
   // ---- figurative designer: open "Design a figure", fold the four-flap base ----
   await page.click('#designBtn');
   await new Promise(r => setTimeout(r, 400));
@@ -279,6 +302,7 @@ const fs = require('fs');
     '| designer cards', dInfo.n, 'four-flap fold z-relief', dRelief.z.toFixed(2), '| designer shot', shotDesigner,
     '| crane (bird base)', craneInfo.V + 'v/' + craneInfo.E + 'e,', 'Kaw/Mae ✓✓,', craneInfo.iv + ' interior, fold z-relief', craneRelief.z.toFixed(2), '| crane shot', shotCrane,
     '| 2-D Miura live fit', miGrid, 'grid,', miIters, 'iters, error', miErr, ',', miMs + 'ms, z-relief', meshOk.toFixed(2),
+    '| 2-D Miura FOLDS:', miFold, '| miura shots', shotMiuraFlat, shotMiuraFolded,
     '| live mirror-IoU', mirror, applied ? '(symmetrized)' : '(left as-is)',
     '| baked butterfly_sym IoU', gsym.iou, '| gallery cards', cards,
     '| pipeline sym-stage', pipe.sym,
