@@ -18,10 +18,11 @@ Honest scope: this recovers the *topology and relative limb lengths* a subject
 "reads" as. It does not know a starfish has exactly five arms - it counts what
 the silhouette gives after pruning, and reports that count so a caller can see
 when segmentation merged two arms or invented one. And a clean tree is only half
-the battle: ``treemaker.design_base`` folds a 3- or 4-flap tree flat end to end,
-but a 5-leaf starfish tree is a pentagon it can only pack and partially
-assemble (a documented TODO there) - so ``design_from_image`` reports the flap
-count and fold validity rather than pretending every subject yields a crane.
+the battle: ``treemaker.design_base`` folds 3-, 4- and 5+-flap star trees flat
+end to end via the universal (gusset) molecule when the packed flap circles form
+a tight tangential hull; a loose hull only partially collapses - so
+``design_from_image`` reports the flap count and honest fold validity rather than
+pretending every subject yields a finished figure.
 
 ``scikit-image`` is used for thinning when present (a fast, well-tested medial
 axis); it is a lazy import, so importing this module - or ``foldforge`` - does
@@ -508,8 +509,9 @@ def design_from_image(path: str, prune_frac: float = 0.35,
     else:
         out.note = (f"{ext.n_leaves}-flap base is PARTIAL: "
                     f"{out.kawasaki_pass}/{out.n_interior} Kawasaki, "
-                    f"{out.maekawa_pass}/{out.n_interior} Maekawa. treemaker "
-                    "folds 3/4-flap tangential bases flat; more flaps need the "
-                    "universal molecule (documented TODO), so this packs but "
-                    "does not fully collapse.")
+                    f"{out.maekawa_pass}/{out.n_interior} Maekawa pass. The "
+                    "universal (gusset) molecule folds a tight tangential hull "
+                    "flat; when the packed flap circles don't form one (arm "
+                    "lengths give a loose, non-tangential hull) some interior "
+                    "vertices don't collapse, so this packs but is not fully flat.")
     return out

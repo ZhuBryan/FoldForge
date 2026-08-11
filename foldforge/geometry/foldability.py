@@ -28,7 +28,11 @@ from foldforge.geometry.crease_graph import CreasePattern
 
 # Default angular tolerance in degrees. Generators and hand-made files carry a
 # little floating-point and rounding noise, so we don't demand exact equality.
-DEFAULT_TOL = 1e-6
+# 1e-3 deg (~1.7e-5 rad) is far below any real Kawasaki violation (those are
+# structural and fail by whole degrees) yet safely above the noise accumulated
+# by constructed patterns like the universal-molecule inset, whose exact-by-math
+# sectors land ~1e-5 deg off after several geometric steps.
+DEFAULT_TOL = 1e-3
 
 
 def check_kawasaki(

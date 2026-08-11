@@ -90,3 +90,30 @@ def test_deterministic():
 def test_expected_leaves_note():
     ext = tree_from_mask(_star_mask(5), smooth_frac=0.0, expected_leaves=5)
     assert "matches expected 5" in ext.note
+
+
+def test_five_arm_star_designs_a_flat_foldable_base():
+    """End to end (no photo): synthetic 5-arm star mask -> tree -> star collapse
+    -> universal-molecule base folds flat. This mirrors the photo pipeline's
+    ``design_from_image`` (which folds the raw stick tree into a single-hub STAR
+    of the limbs' body-distances) and pins the exact fold-validity we report for
+    the real starfish: every interior vertex passes Kawasaki and Maekawa, and the
+    flap lengths are reproduced. Uses a synthetic mask to stay fast/deterministic
+    (the real starfish photo, via GrabCut, is only used for the proof figure)."""
+    pytest.importorskip("skimage")
+    from foldforge.design.treemaker import (
+        star_tree, design_base, flap_length_errors)
+    from foldforge.geometry.foldability import foldability_report
+
+    ext = tree_from_mask(_star_mask(5), smooth_frac=0.0)
+    assert ext.n_leaves == 5
+    # the exact reduction design_from_image uses: limb -> distance-to-body flap
+    flaps = [ext.tree.flap_length(lf) for lf in ext.tree.leaves()]
+    star = star_tree(flaps, name="star-test")
+    packing, pattern = design_base(star)
+
+    rep = foldability_report(pattern)
+    assert len(rep.vertices) >= 5
+    assert rep.flat_foldable                       # folds flat end to end
+    assert all(v.kawasaki and v.maekawa for v in rep.vertices)
+    assert flap_length_errors(packing, pattern).max() < 1e-6  # 0% flap error
