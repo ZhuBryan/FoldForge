@@ -417,12 +417,15 @@ def bake_animals(force=False):
 # design, not decoration.
 _DESIGN_CACHE = os.path.join(_HERE, "_designs_baked.json")
 
-# (tree key, studio label, folds-flat?) - all three fold flat end to end via the
-# one universal (gusset) molecule; five-flap is the pentagon it now resolves.
+# (tree key, studio label, folds-flat?) - the star bases fold flat via the one
+# universal (gusset) molecule (five-flap is the pentagon it resolves); river-four
+# is a body with limbs (an internal spine edge) that folds flat via the
+# single-spine river molecule (two sub-hub nodes joined by one spine crease).
 DESIGN_SPECS = [
     ("three-flap", "Three-flap base", True),
     ("four-flap", "Four-flap base", True),
     ("five-flap", "Five-flap base", True),
+    ("river-four", "River base (body + limbs)", True),
 ]
 
 _CP_COLORS = {"M": "#ff6b6b", "V": "#5b9bd5", "B": "#97a1b0", "F": "#5a6472"}

@@ -47,12 +47,19 @@ Honest scope (see ``crease_pattern`` and the tests):
       *and* Maekawa and every flap length is exact (< ~1e-8 relative error). The
       triangle rabbit-ear and the single-incircle quad are just its base cases;
       pentagons and larger add the gusset creases that reconcile the parts.
-    * **Rivers** (trees with an internal spine edge) are a documented TODO. The
-      circle method packs them (path lengths carry the spine), but two leaves on
-      the same sub-hub have discs whose radii include the spine while their
-      separation does not, so the discs overlap by the river width; resolving
-      that needs sub-tree molecule decomposition, which is out of scope here.
-      ``river_tree`` builds such a tree so the limitation is testable, not faked.
+    * **Rivers** (trees with an internal spine edge - a body with limbs). The
+      packing is exact for every river: a disc radius is the leaf's *terminal*
+      edge (not its full path to the root), so two leaves sharing a hub stay
+      tangent and the spine shows up only as the extra path-distance that spaces
+      cross-river leaves apart - a clean open river band, no overlap. The
+      molecule handles the **single-spine** river (``river-four``: two flaps off
+      each of two sub-hubs) end to end: it insets to two hub nodes joined by one
+      spine crease, and every interior vertex passes Kawasaki + Maekawa with exact
+      flap lengths (root-side ``r_i``, far-side ``r_i + scale*spine``). It is built
+      behind an honest self-check, so *asymmetric*, *many-leaf* and *multi-junction*
+      rivers - which need the extra gusset nodes this two-node construction does
+      not emit - fail the check and fall back to the partial rabbit-ear base
+      rather than claim a fold they do not achieve.
 
     from foldforge.design.treemaker import get_tree, design_base
     packing, pattern = design_base(get_tree("four-flap"))
@@ -118,6 +125,20 @@ class MetricTree:
         """Target flap length = path from the leaf to the root hub."""
         return self.path_length(leaf, self.root)
 
+    def terminal_length(self, leaf: int) -> float:
+        """Length of the leaf's own (single) incident edge - its *terminal* edge.
+
+        For a star tree this equals ``flap_length`` (the root *is* the leaf's
+        parent). For a river tree a spine-side leaf's terminal edge is shorter
+        than its flap length by the spine it must still cross to reach the root;
+        that difference is exactly the river band the packing must leave open.
+        """
+        return self._adj[leaf][0][1]
+
+    def parent_hub(self, leaf: int) -> int:
+        """The internal node the leaf hangs off (the other end of its edge)."""
+        return self._adj[leaf][0][0]
+
 
 def star_tree(lengths: list[float], name: str = "star") -> MetricTree:
     """A single-hub tree: node 0 is the body, nodes 1..k the flaps."""
@@ -131,9 +152,10 @@ def river_tree(spine: float, left: list[float], right: list[float],
 
     Node 0 and node 1 are hubs joined by an edge of length ``spine``; ``left``
     hangs off hub 0 and ``right`` off hub 1. Leaves on opposite hubs are
-    separated by the spine, which the packing honours - but see the module
-    docstring: the molecule side of rivers is a documented TODO, so a river tree
-    packs and exports yet does not (yet) fold flat.
+    separated by the spine, which the packing honours by leaving an open river
+    band between them. A *single-spine, symmetric* river (e.g. two equal flaps
+    off each hub) folds flat end to end; asymmetric or many-leaf variants pack
+    cleanly but fall back to the honest partial base (see the module docstring).
     """
     edges = [(0, 1, spine)]
     nid = 2
@@ -154,9 +176,9 @@ BUILTIN_TREES = {
     # A five-limb figure -> a pentagon (generally non-tangential) filled by the
     # universal (gusset) molecule: folds flat end to end (see the module docstring).
     "five-flap": star_tree([1.2, 0.9, 0.9, 0.8, 0.8], "five-flap"),
-    # A tree with an internal spine edge (two leaves off each end). Packs with a
-    # river between the sub-hubs; the molecule side is a documented TODO, so this
-    # is here to make the river limitation testable, not to claim it folds.
+    # A body with limbs: an internal spine edge with two flaps off each sub-hub.
+    # Packs with a clean open river band between the hubs and folds flat end to
+    # end - the single-spine river molecule (two hub nodes + one spine crease).
     "river-four": river_tree(0.5, [1.0, 1.0], [1.0, 1.0], "river-four"),
 }
 
@@ -178,12 +200,17 @@ class Packing:
     tree: MetricTree
     leaves: list[int]            # node id for each disc, in row order
     centers: np.ndarray          # (N, 2) disc centres in [0, 1]^2
-    radii: np.ndarray            # (N,) disc radii = scale * flap_length
+    radii: np.ndarray            # (N,) disc radii = scale * terminal edge length
     scale: float                 # the packing scale that was maximised
 
     @property
     def flap_targets(self) -> np.ndarray:
-        """Scaled target flap length for each disc (== radius for a star tree)."""
+        """Scaled target flap length for each disc = scale * path-to-root.
+
+        This is the *full* flap length (a spine-side leaf's target includes the
+        river it crosses to reach the root), which equals the disc radius only
+        for a star tree (where terminal edge == path to root).
+        """
         return np.array([self.scale * self.tree.flap_length(l) for l in self.leaves])
 
 
@@ -198,7 +225,13 @@ def pack_tree(tree: MetricTree) -> Packing:
     if n < 3:
         raise ValueError("need at least 3 leaves to triangulate a base")
 
-    rho = np.array([tree.flap_length(l) for l in leaves])          # flap lengths
+    # Disc radius = the leaf's own TERMINAL edge (leaf-to-parent), NOT its full
+    # path to the root. For a star tree these coincide; for a river tree a
+    # spine-side leaf's terminal edge is shorter, so two leaves sharing a hub
+    # stay tangent (radii sum == their path distance) instead of overlapping by
+    # the spine. The spine shows up purely in the path-distance constraint below,
+    # which spaces cross-river leaves an extra river band apart.
+    rho = np.array([tree.terminal_length(l) for l in leaves])      # terminal edges
     d = np.array([[tree.path_length(a, b) for b in leaves] for a in leaves])
 
     # Deterministic start: leaves evenly on a circle, a modest scale.
@@ -604,20 +637,50 @@ def _assign_mountain_valley(edges, assign, interior, seed=104729):
     return out, resid
 
 
-def _is_tight_hull(pts: np.ndarray, radii: np.ndarray, hidx: list[int],
-                   tol: float = 1e-4) -> bool:
-    """True iff every convex-hull edge is a tangent disc pair (``len == r_i + r_j``).
+def _reduced_dist(packing: Packing, i: int, j: int) -> float:
+    """The *reduced* target distance between two discs = ``scale * treepath``.
 
-    That is the requirement for the universal molecule to preserve flap lengths.
-    A river tree packs with overlapping discs, so its hull edges are *shorter*
-    than ``r_i + r_j`` and this returns False - keeping rivers on the honest
-    partial (rabbit-ear) path.
+    This is the general "tight length" the molecule must reproduce: for two
+    leaves sharing a hub it equals ``r_i + r_j`` (tangent, no river); across a
+    spine it is larger by the river band ``scale * spine``. Star trees hit the
+    first case on every edge, so everything below reduces to the old
+    ``r_i + r_j`` test with zero change for them.
     """
+    return packing.scale * packing.tree.path_length(
+        packing.leaves[i], packing.leaves[j])
+
+
+def _hull_river_widths(packing: Packing, hidx: list[int]) -> list[float]:
+    """River band width left open on each convex-hull edge (0 == tangent pair).
+
+    ``W_k = scale*treepath(i, j) - (r_i + r_j)`` for hull edge ``k = (i, j)``.
+    A star's hull has ``W_k == 0`` everywhere; a single-spine river has exactly
+    two positive entries (the two sides of the band between the sub-hubs).
+    """
+    m = len(hidx)
+    out = []
+    for k in range(m):
+        i, j = hidx[k], hidx[(k + 1) % m]
+        r = packing.radii[i] + packing.radii[j]
+        out.append(_reduced_dist(packing, i, j) - r)
+    return out
+
+
+def _is_tight_hull(packing: Packing, hidx: list[int], tol: float = 1e-4) -> bool:
+    """True iff every hull edge is *reduced-tight* (``len == scale*treepath``).
+
+    Generalises the old tangent-disc test (``len == r_i + r_j``): a hull edge is
+    tight when its length equals the reduced tree-path distance between the two
+    leaves it joins. For a star every hull edge is a tangent disc pair, so this
+    is unchanged; for a (correctly packed) river the river edges are longer than
+    ``r_i + r_j`` yet still tight in this reduced sense.
+    """
+    pts = packing.centers
     m = len(hidx)
     for k in range(m):
         i, j = hidx[k], hidx[(k + 1) % m]
         edge = float(np.linalg.norm(pts[i] - pts[j]))
-        if abs(edge - (radii[i] + radii[j])) > tol:
+        if abs(edge - _reduced_dist(packing, i, j)) > tol:
             return False
     return True
 
@@ -694,22 +757,231 @@ def _universal_pattern(packing: Packing, hidx: list[int]) -> CreasePattern:
     )
 
 
+def _line_normal(p0: np.ndarray, p1: np.ndarray) -> tuple[np.ndarray, float]:
+    """Unit normal ``n`` and offset ``c`` of the line through ``p0, p1`` (``n.x = c``)."""
+    d = p1 - p0
+    d = d / np.linalg.norm(d)
+    n = np.array([d[1], -d[0]])
+    return n, float(n.dot(p0))
+
+
+def _incenter_of_lines(lines, interior_pt):
+    """Point equidistant (inward) from a set of lines, least squares.
+
+    Solves ``n_e . x + r = c_e`` with every normal oriented to face
+    ``interior_pt``. Returns ``(centre, r, max_residual)``; residual ~0 means the
+    lines share one inscribed circle (the sub-hub is a clean tangent fan).
+    """
+    A, b = [], []
+    for n, c in lines:
+        s = 1.0 if (n.dot(interior_pt) - c) < 0 else -1.0
+        A.append([s * n[0], s * n[1], 1.0])
+        b.append(s * c)
+    A = np.array(A); b = np.array(b)
+    sol, *_ = np.linalg.lstsq(A, b, rcond=None)
+    return sol[:2], float(sol[2]), float(np.max(np.abs(A @ sol - b)))
+
+
+def _river_pattern(packing: Packing, hidx: list[int], widths: list[float]):
+    """Universal molecule for a *single-spine* river (a body with two sub-hubs).
+
+    The packed hull is a tangent polygon with exactly two *river* edges (the
+    ``widths[k] > 0`` sides of the band between the sub-hubs). Insetting the hull
+    at unit speed, each sub-hub's flaps collapse to one interior node
+    (``C0`` for the root hub, ``C1`` for the far hub) and the two nodes are joined
+    by a single spine crease of length ``scale * spine`` - the river band folds as
+    a flat pleat between them. Concretely:
+
+        * ``C0`` / ``C1`` are the incentres of the lines bounding each sub-hub
+          (that hub's own border edges *plus* the two shared river edges), so
+          every wedge at them is a bisector pair and Kawasaki holds;
+        * each leaf corner gets a ridge to its hub node, each border tangent
+          point a hinge to its hub node, and the two hub nodes share the spine
+          ridge;
+        * border edges are still cut at ``r_i`` (each leaf's terminal edge), so a
+          root-side flap length is ``r_i`` and a far-side flap length is
+          ``r_i + scale*spine`` - both exact.
+
+    Returns ``(pattern, ok)``. ``ok`` is the honest self-check: True only when the
+    built pattern actually passes Kawasaki + Maekawa at every interior vertex and
+    reproduces every flap length. The caller falls back to the partial base when
+    ``ok`` is False (asymmetric / many-leaf / multi-junction rivers, which need
+    the extra gusset nodes this two-node construction does not emit).
+    """
+    from foldforge.geometry.foldability import foldability_report
+
+    pts = packing.centers
+    m = len(hidx)
+    Q = pts[hidx].copy()
+    r = packing.radii[hidx].copy()
+    river = [k for k in range(m) if widths[k] > 1e-6]
+    if len(river) != 2:
+        return None, False
+    e0, e1 = river
+
+    def arc(a, b):                              # hull vertices strictly between edges
+        out, k = [], (a + 1) % m
+        while True:
+            out.append(k)
+            if k == b:
+                break
+            k = (k + 1) % m
+        return out
+
+    grpA = arc(e0, e1)                          # one sub-hub's leaves
+    grpB = arc(e1, e0)                          # the other's
+    centroid = Q.mean(axis=0)
+
+    def hub_node(grp):
+        lines = [_line_normal(Q[e0], Q[(e0 + 1) % m]),
+                 _line_normal(Q[e1], Q[(e1 + 1) % m])]
+        for k in grp:
+            nk = (k + 1) % m
+            if widths[k] <= 1e-6 and k in grp and nk in grp:
+                lines.append(_line_normal(Q[k], Q[nk]))
+        return _incenter_of_lines(lines, centroid)
+
+    C0, _rad0, res0 = hub_node(grpA)
+    C1, _rad1, res1 = hub_node(grpB)
+
+    # border tangent feet: each edge cut at r_i from its own corner (a band of
+    # width == widths[k] is left between the two feet of a river edge).
+    feet = []
+    for k in range(m):
+        i, j = k, (k + 1) % m
+        u = (Q[j] - Q[i]); u = u / np.linalg.norm(u)
+        feet.append((Q[i] + r[i] * u, Q[j] - r[j] * u))
+
+    def hub_of(vtx):
+        return C0 if vtx in grpA else C1
+
+    creases: list = []
+    for k in range(m):
+        i, j = k, (k + 1) % m
+        fi, fj = feet[k]
+        creases.append((Q[i], fi, "B"))
+        creases.append((fj, Q[j], "B"))
+        if widths[k] > 1e-6:
+            creases.append((fi, fj, "B"))       # the river band on the paper edge
+    for k in grpA:
+        creases.append((Q[k], C0, "ridge"))
+    for k in grpB:
+        creases.append((Q[k], C1, "ridge"))
+    creases.append((C0, C1, "ridge"))           # the spine crease (river core)
+    for k in range(m):
+        i, j = k, (k + 1) % m
+        fi, fj = feet[k]
+        creases.append((hub_of(i), fi, "hinge"))
+        creases.append((hub_of(j), fj, "hinge"))
+
+    pattern = _planarise(packing, creases)
+
+    # honest self-check: Kawasaki + Maekawa everywhere and flap lengths exact.
+    report = foldability_report(pattern)
+    ok = all(v.kawasaki and v.maekawa for v in report.vertices)
+    # flap lengths: root-side == r_i, far-side == r_i + spine crease length.
+    spine_len = float(np.linalg.norm(C0 - C1))
+    flap = np.full(len(packing.leaves), np.nan)
+    for gi in range(len(packing.leaves)):
+        b_edges = [e for e in pattern.incident_edges(gi)
+                   if pattern.assignment[e] == "B"]
+        if not b_edges:
+            continue
+        halves = [float(np.linalg.norm(pattern.vertices[pattern.edges[e][0]]
+                                       - pattern.vertices[pattern.edges[e][1]]))
+                  for e in b_edges]
+        base = min(halves)
+        hub = packing.tree.parent_hub(packing.leaves[gi])
+        flap[gi] = base + (0.0 if hub == packing.tree.root else spine_len)
+    target = packing.flap_targets
+    err = np.abs(flap - target) / np.maximum(target, 1e-9)
+    ok = ok and bool(np.nanmax(err) < 0.02)
+    pattern.metadata["flap_lengths"] = flap
+    return pattern, ok
+
+
+def _planarise(packing: Packing, creases: list) -> CreasePattern:
+    """Shared arrangement builder: split every crease at its crossings, dedupe,
+    assign M/V by the global Maekawa search, and extract faces.
+
+    Leaf centres are inserted first so their row indices stay ``0..N-1`` (the
+    flap-length reader relies on that).
+    """
+    pts = packing.centers
+    bag = _VertexBag()
+    for centre in pts:
+        bag.add(centre)
+    segs = [(np.asarray(a, float), np.asarray(b, float), kind)
+            for a, b, kind in creases
+            if np.linalg.norm(np.asarray(a, float) - np.asarray(b, float)) > 1e-9]
+    n = len(segs)
+    params = [[0.0, 1.0] for _ in range(n)]
+    for i in range(n):
+        a, b, _ = segs[i]
+        for jj in range(n):
+            if i != jj:
+                params[i] += _seg_split_params(a, b, segs[jj][0], segs[jj][1])
+
+    prio = {"B": 3, "gusset": 2, "ridge": 2, "hinge": 1, "edge": 1}
+    edgemap: dict[tuple[int, int], str] = {}
+    for i in range(n):
+        a, b, kind = segs[i]
+        ts = sorted({round(t, 11) for t in params[i]})
+        pts_i = [a + t * (b - a) for t in ts]
+        for p, q in zip(pts_i[:-1], pts_i[1:]):
+            ia, ib = bag.add(p), bag.add(q)
+            if ia == ib:
+                continue
+            key = (ia, ib) if ia < ib else (ib, ia)
+            if key in edgemap:
+                if prio[kind] > prio[edgemap[key]]:
+                    edgemap[key] = kind
+            else:
+                edgemap[key] = kind
+
+    verts = np.array(bag.coords)
+    kind_to_assign = {"B": "B", "ridge": "M", "hinge": "V", "gusset": "V", "edge": "V"}
+    edges = np.array(list(edgemap.keys()), dtype=int)
+    assign = [kind_to_assign[edgemap[tuple(e)]] for e in map(tuple, edges)]
+    scratch = CreasePattern(vertices=verts, edges=edges, assignment=list(assign),
+                            faces=[], metadata={})
+    interior = scratch.interior_vertices()
+    assign, _resid = _assign_mountain_valley(edges, assign, interior)
+    faces = _extract_faces(verts, edges)
+    return CreasePattern(
+        vertices=verts, edges=edges, assignment=assign, faces=faces,
+        metadata={"name": f"treemaker:{packing.tree.name}"},
+    )
+
+
 def crease_pattern(packing: Packing) -> CreasePattern:
     """Build the crease pattern for a packed base.
 
-    If the convex hull of the packed centres is a *tight* tangent-disc polygon
-    (true for every star base - 3, 4, 5 or more flaps), fill it with the one
-    universal (gusset) molecule, which folds flat end to end: it subsumes the
-    triangle rabbit-ear and the tangential-quad incircle as base cases and adds
-    the gusset creases pentagons need. Otherwise (a river tree, whose discs
-    overlap by the spine width) fall back to the per-Delaunay-triangle rabbit-ear
-    assembly, an honest *partial* base whose non-tangent diagonals are unresolved.
+    Routing (all three share the one reduced-distance tight test):
+
+    * **Star** - the hull is reduced-tight with *no* river edges: fill it with
+      the universal (gusset) molecule (triangle rabbit-ear / tangential-quad
+      incircle / pentagon+ gussets), which folds flat end to end.
+    * **Single-spine river** - the hull is reduced-tight with exactly two river
+      edges: build the two-node river molecule and, *only if it self-verifies*
+      flat-foldable with exact flap lengths, return it. This is what makes a body
+      with limbs fold, not just a star.
+    * **Otherwise** (river molecule fails its self-check, or the hull is not
+      reduced-tight) fall back to the per-Delaunay-triangle rabbit-ear assembly -
+      an honest *partial* base whose non-tangent diagonals are unresolved.
     """
     pts = packing.centers
     hull = ConvexHull(pts)
     hidx = [int(i) for i in hull.vertices]     # CCW hull corners (row indices)
-    if len(hidx) == len(pts) and _is_tight_hull(pts, packing.radii, hidx):
-        return _universal_pattern(packing, hidx)
+    if len(hidx) == len(pts) and _is_tight_hull(packing, hidx):
+        widths = _hull_river_widths(packing, hidx)
+        n_river = sum(1 for w in widths if w > 1e-6)
+        if n_river == 0:
+            return _universal_pattern(packing, hidx)
+        if n_river == 2:
+            pattern, ok = _river_pattern(packing, hidx, widths)
+            if ok:
+                return pattern
     return _rabbit_ear_pattern(packing)
 
 
@@ -806,10 +1078,17 @@ def flap_length_errors(packing: Packing, pattern: CreasePattern) -> np.ndarray:
     off the assembled geometry, matching whichever molecule ``crease_pattern``
     used (the universal molecule for a tight tangent hull, per-triangle otherwise).
     """
+    # A river pattern caches its geometric flap lengths (border tangent + the
+    # spine crease each far-side flap crosses) when it was built - use them.
+    if "flap_lengths" in pattern.metadata:
+        measured = np.asarray(pattern.metadata["flap_lengths"], dtype=float)
+        target = packing.flap_targets
+        return np.abs(measured - target) / np.maximum(target, 1e-9)
+
     pts = packing.centers
     hull = ConvexHull(pts)
     hidx = [int(i) for i in hull.vertices]
-    if len(hidx) == len(pts) and _is_tight_hull(pts, packing.radii, hidx):
+    if len(hidx) == len(pts) and _is_tight_hull(packing, hidx):
         # Universal molecule: each border edge is cut at its disc tangent point,
         # so a leaf's flap length is the shorter of its two incident border (B)
         # crease halves - read directly off the built pattern.

@@ -108,12 +108,60 @@ def test_five_flap_universal_molecule_folds_flat():
     assert len(pattern.faces) > 0             # faces populated for the FOLD viewer
 
 
-def test_river_tree_is_honestly_partial():
-    """Documented limit: the river tree (overlapping discs) does NOT fully fold.
+def test_river_packing_leaves_open_band_no_overlap():
+    """The river packing is exact: same-hub discs tangent, cross-river ones gapped.
 
-    It still packs and exports; this pins the honest ceiling so a regression that
-    silently 'fixed' it (or broke the packing) would fail loudly.
+    Radius == the leaf's terminal edge, so two leaves sharing a hub are tangent
+    (no overlap by the spine) and cross-river leaves sit an extra river band
+    apart. This pins the root-cause fix (radius was the full path-to-root before).
     """
-    ok, report, err = _fully_folds("river-four")
-    assert not ok, "river-four: unexpectedly fully foldable - update the docs/claims"
+    from foldforge.design.treemaker import pack_tree
+    tree = get_tree("river-four")
+    packing = pack_tree(tree)
+    c, r = packing.centers, packing.radii
+    for i in range(len(c)):
+        for j in range(i + 1, len(c)):
+            assert np.linalg.norm(c[i] - c[j]) >= r[i] + r[j] - 1e-5   # no overlap
+    # exactly two cross-river pairs are held an extra band apart (> tangent).
+    gapped = 0
+    for i in range(len(c)):
+        for j in range(i + 1, len(c)):
+            if np.linalg.norm(c[i] - c[j]) > r[i] + r[j] + 1e-4:
+                gapped += 1
+    assert gapped == 4                              # the 4 cross-river leaf pairs
+
+
+def test_single_spine_river_folds_flat():
+    """A body with limbs (single-spine river) folds flat end to end.
+
+    Every interior vertex passes Kawasaki AND Maekawa and every flap length is
+    exact (root-side flaps r_i, far-side flaps r_i + spine). This is the piece
+    that takes the design path past single-hub star trees.
+    """
+    packing, pattern = design_base(get_tree("river-four"))
+    report = foldability_report(pattern)
+    assert len(report.vertices) == 2                # the two sub-hub nodes
+    assert report.flat_foldable
+    for v in report.vertices:
+        assert v.kawasaki is True, f"vertex {v.vertex} fails Kawasaki"
+        assert v.maekawa is True, f"vertex {v.vertex} fails Maekawa"
+    err = flap_length_errors(packing, pattern)
+    assert err.max() < 0.02, f"river flap error {err.max():.4f}"
+    assert len(pattern.faces) > 0                   # faces populated for the viewer
+
+
+def test_asymmetric_river_is_honestly_partial():
+    """Honest ceiling: asymmetric / many-leaf rivers do NOT fully fold yet.
+
+    The two-node river molecule only closes for the symmetric single-spine case;
+    asymmetric sub-hubs need extra gusset nodes it does not emit, so the self-
+    check fails and it falls back to the partial base. This pins that boundary so
+    a regression that silently 'fixed' or faked it would fail loudly.
+    """
+    from foldforge.design.treemaker import river_tree, design_base
+    tree = river_tree(0.5, [1.2, 0.8], [1.0, 0.9], "river-asym")
+    packing, pattern = design_base(tree)
+    report = foldability_report(pattern)
+    passes = all(v.kawasaki and v.maekawa for v in report.vertices)
+    assert not passes, "asymmetric river unexpectedly folds flat - update claims"
     assert len(report.vertices) > 0                 # it still builds a real pattern

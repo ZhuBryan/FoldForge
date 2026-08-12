@@ -114,6 +114,62 @@ def multiflap_png(name, path):
     return err, (n, nk, nm), works
 
 
+def river_png(name, path):
+    """Proof panel for the single-spine river: packing (river gap) + crease + verdict."""
+    packing, pattern, err, (n, nk, nm), works = _stats(name)
+    tree = packing.tree
+    fig, (axp, axc) = plt.subplots(1, 2, figsize=(11, 5.4))
+    # left: packing, coloured by sub-hub, with the open river band drawn.
+    axp.add_patch(plt.Rectangle((0, 0), 1, 1, fill=False, ec="black", lw=1.5))
+    hubcol = {}
+    palette = ["#1f77b4", "#2ca02c"]
+    for (x, y), r, leaf in zip(packing.centers, packing.radii, packing.leaves):
+        hub = tree.parent_hub(leaf)
+        col = hubcol.setdefault(hub, palette[len(hubcol) % 2])
+        axp.add_patch(plt.Circle((x, y), r, fill=False, ec=col, lw=1.8))
+        axp.plot([x], [y], "o", color="#d62728", ms=5)
+        axp.text(x, y + 0.03, f"flap {leaf}\n(hub {hub})", ha="center", fontsize=8)
+    # shade the river band: the strip between the two sub-hub clusters.
+    cen = packing.centers
+    hubs = sorted(set(tree.parent_hub(l) for l in packing.leaves))
+    if len(hubs) == 2:
+        gA = cen[[i for i, l in enumerate(packing.leaves) if tree.parent_hub(l) == hubs[0]]]
+        gB = cen[[i for i, l in enumerate(packing.leaves) if tree.parent_hub(l) == hubs[1]]]
+        mid = (gA.mean(0) + gB.mean(0)) / 2
+        axp.plot([mid[0]], [mid[1]], "s", color="#d67d1d", ms=9)
+        axp.annotate("open river band\n(= scale x spine)", mid, mid + np.array([0.0, -0.16]),
+                     ha="center", fontsize=8, color="#a85a10",
+                     arrowprops=dict(arrowstyle="->", color="#a85a10"))
+    axp.set_xlim(-0.05, 1.05); axp.set_ylim(-0.05, 1.05); axp.set_aspect("equal")
+    axp.set_title(f"circle packing (scale = {packing.scale:.3f})\ntwo sub-hubs, no overlap")
+    axp.axis("off")
+    # right: crease pattern, spine crease thickened.
+    v = pattern.vertices
+    iv = pattern.interior_vertices()
+    for (a, b), kind in zip(pattern.edges, pattern.assignment):
+        both_interior = a in iv and b in iv
+        lw = 3.4 if (both_interior and kind in "MV") else (2.0 if kind in "MV" else 1.4)
+        axc.plot([v[a, 0], v[b, 0]], [v[a, 1], v[b, 1]],
+                 color=_MV.get(kind, "#999"), lw=lw)
+    axc.plot(v[:, 0], v[:, 1], "o", color="black", ms=3)
+    for i in iv:
+        axc.plot(v[i, 0], v[i, 1], "o", mfc="none", mec="#d67d1d", ms=13, mew=2)
+    axc.set_aspect("equal"); axc.axis("off")
+    axc.set_title("single-spine river molecule\n(red=mountain, blue=valley, black=border;\n"
+                  "thick=spine crease, orange ring=sub-hub node)")
+    verdict = "FOLDS FLAT END TO END" if works else "PARTIAL (see docs)"
+    box = (f"{name}\ninterior vertices: {n}\n"
+           f"Kawasaki: {nk}/{n}   Maekawa: {nm}/{n}\n"
+           f"max flap error: {err.max()*100:.2f}%\n{verdict}")
+    axc.text(1.02, 0.5, box, transform=axc.transAxes, va="center", fontsize=10,
+             family="monospace",
+             bbox=dict(boxstyle="round", fc="#eaffea" if works else "#fff2e6",
+                       ec="#2ca02c" if works else "#d67d1d"))
+    fig.suptitle("TreeMaker-lite river base (a body with limbs)", fontsize=13)
+    fig.savefig(path, dpi=140, bbox_inches="tight"); plt.close(fig)
+    return err, (n, nk, nm), works
+
+
 def birdbase_png(path):
     """Proof panel for the canonical bird base: M/V crease pattern + pass counts.
 
@@ -163,6 +219,8 @@ def main():
         "four-flap", os.path.join(OUT, "treemaker_multiflap.png"))
     ferr, (fn, fnk, fnm), fworks = multiflap_png(
         "five-flap", os.path.join(OUT, "treemaker_fiveflap.png"))
+    rerr, (rn, rnk, rnm), rworks = river_png(
+        "river-four", os.path.join(OUT, "treemaker_river.png"))
     bn, bnk, bnm = birdbase_png(os.path.join(OUT, "bird_base_crease.png"))
 
     print("three-flap base, end to end:")
@@ -180,10 +238,15 @@ def main():
     print(f"  Kawasaki        : {fnk}/{fn} interior vertices pass")
     print(f"  Maekawa         : {fnm}/{fn} interior vertices pass")
     print(f"  verdict         : {'FOLDS FLAT END TO END' if fworks else 'PARTIAL'}")
+    print("single-spine river base — river molecule (treemaker_river.png):")
+    print(f"  flap len error  : max {rerr.max() * 100:.2f}%  mean {rerr.mean() * 100:.2f}%")
+    print(f"  Kawasaki        : {rnk}/{rn} interior vertices pass")
+    print(f"  Maekawa         : {rnm}/{rn} interior vertices pass")
+    print(f"  verdict         : {'FOLDS FLAT END TO END' if rworks else 'PARTIAL'}")
     print("canonical bird base (bird_base_crease.png):")
     print(f"  Kawasaki        : {bnk}/{bn} interior vertices pass")
     print(f"  Maekawa         : {bnm}/{bn} interior vertices pass")
-    print(f"  wrote 6 files into {OUT}")
+    print(f"  wrote 7 files into {OUT}")
 
 
 if __name__ == "__main__":
