@@ -381,7 +381,7 @@ def _poly_geometry(Q: np.ndarray):
     return vel, cot
 
 
-def _first_gusset_event(Q: np.ndarray, rho: np.ndarray):
+def _first_gusset_event(Q: np.ndarray, rho: np.ndarray, offs: np.ndarray | None = None):
     """Smallest inset time at which a non-adjacent vertex pair becomes tight.
 
     Returns ``(t, i, j)`` or ``None``. ``Q_i(t) = Q_i + t * vel_i`` and
@@ -399,7 +399,8 @@ def _first_gusset_event(Q: np.ndarray, rho: np.ndarray):
                 continue                            # adjacent: that's a tight edge already
             dv = vel[i] - vel[j]
             d0 = Q[i] - Q[j]
-            rs = rho[i] + rho[j]
+            off = 0.0 if offs is None else float(offs[i, j])
+            rs = rho[i] + rho[j] + off       # river band widens the tight length
             rc = -(cot[i] + cot[j])
             A = float(dv.dot(dv) - rc * rc)
             B = float(2 * d0.dot(dv) - 2 * rs * rc)
@@ -423,7 +424,8 @@ def _first_gusset_event(Q: np.ndarray, rho: np.ndarray):
     for _ in range(80):                             # Newton polish of the tight pair
         Qn = Q + t * vel
         d = float(np.linalg.norm(Qn[i] - Qn[j]))
-        rr = float(rho[i] - t * cot[i] + rho[j] - t * cot[j])
+        off = 0.0 if offs is None else float(offs[i, j])
+        rr = float(rho[i] - t * cot[i] + rho[j] - t * cot[j] + off)
         f = d - rr
         dd = float((Qn[i] - Qn[j]).dot(vel[i] - vel[j]) / d)
         t = t - f / (dd + cot[i] + cot[j])
@@ -447,7 +449,7 @@ def _incircle_flaps_ok(Q: np.ndarray, rho: np.ndarray, tol: float = 1e-7):
     return True, ic
 
 
-def _um_fill(Q, rho, outer, creases, leaf_ids):
+def _um_fill(Q, rho, outer, creases, leaf_ids, packing):
     """Recursively emit the universal-molecule creases of one active polygon.
 
     ``outer[k]`` is the paper-border tangent point that edge ``k``'s hinge must
@@ -463,11 +465,32 @@ def _um_fill(Q, rho, outer, creases, leaf_ids):
     inherits its corners' leaf ids directly via ``leaf_ids[idx]``.
     """
     m = len(Q)
+    # Reduced (river-aware) tight lengths: for each active-polygon vertex pair the
+    # extra band width ``scale*treepath(leaf_i, leaf_j) - (r_i + r_j)`` the tree
+    # path opens between them. Zero for a star (reduced_dist == r_i + r_j on every
+    # pair), positive where the path crosses a spine - so every tightness test
+    # below is river-aware while staying byte-identical on stars.
+    offs = np.zeros((m, m))
+    for a in range(m):
+        for b in range(a + 1, m):
+            la, lb = int(leaf_ids[a]), int(leaf_ids[b])
+            w = (_reduced_dist(packing, la, lb)
+                 - (packing.radii[la] + packing.radii[lb]))
+            offs[a, b] = offs[b, a] = w
+    # Base-case river-awareness: a river crossing the polygon *interior* (a
+    # non-adjacent pair held an extra band apart) can never be one incircle fan -
+    # it must be split, so it never reaches the single-incentre base case.
+    interior_river = any(
+        offs[a, b] > 1e-9
+        for a in range(m) for b in range(a + 1, m)
+        if b != (a + 1) % m and a != (b + 1) % m)
     if m == 3:
         ic = _incenter(Q[0], Q[1], Q[2])
         base = True
     else:
         base, ic = _incircle_flaps_ok(Q, rho)
+    if base and interior_river:
+        base = False                                # force the river split
     if base:
         for k in range(m):
             creases.append((Q[k], ic, "ridge"))
@@ -476,7 +499,7 @@ def _um_fill(Q, rho, outer, creases, leaf_ids):
             creases.append((Q[k], Q[(k + 1) % m], "edge"))
         return
 
-    event = _first_gusset_event(Q, rho)
+    event = _first_gusset_event(Q, rho, offs)
     if event is None:                               # degenerate guard: fill as incircle
         ic, _, _ = _incircle(Q)
         for k in range(m):
@@ -493,8 +516,10 @@ def _um_fill(Q, rho, outer, creases, leaf_ids):
     for k in range(m):
         creases.append((Q[k], Qn[k], "ridge"))      # collar bisector trace
         creases.append((Q[k], Q[(k + 1) % m], "edge"))
-    # gusset, split at its tangent point (shared exactly by both sub-molecules)
-    tg = Qn[i] + (Qn[j] - Qn[i]) * (rhon[i] / (rhon[i] + rhon[j]))
+    # gusset, split at its tangent point (shared exactly by both sub-molecules);
+    # the river band offset shifts the split so each side still keeps its flap.
+    off = float(offs[i, j])
+    tg = Qn[i] + (Qn[j] - Qn[i]) * (rhon[i] / (rhon[i] + rhon[j] + off))
     creases.append((Qn[i], tg, "gusset"))
     creases.append((tg, Qn[j], "gusset"))
 
@@ -517,7 +542,7 @@ def _um_fill(Q, rho, outer, creases, leaf_ids):
                 sub_outer.append(tg)                # gusset edge: hinge to gusset tangent
             else:
                 sub_outer.append(outer[a])          # inherit the border tangent
-        _um_fill(Qn[idx], rhon[idx], sub_outer, creases, leaf_ids[idx])
+        _um_fill(Qn[idx], rhon[idx], sub_outer, creases, leaf_ids[idx], packing)
 
 
 def _seg_split_params(a, b, c, d):
@@ -727,7 +752,7 @@ def _universal_pattern(packing: Packing, hidx: list[int]) -> CreasePattern:
     # geometry change).
     leaf_ids = np.asarray(hidx)
     creases: list = []
-    _um_fill(Q0, r0, outer, creases, leaf_ids)
+    _um_fill(Q0, r0, outer, creases, leaf_ids, packing)
     creases += borders
 
     # Planarise: leaf centres are added first so their row indices are 0..N-1.
