@@ -28,6 +28,7 @@ from foldforge.design.treemaker import (
     design_base,
     flap_length_errors,
     folded_schematic,
+    reduced_dist,
 )
 from foldforge.design.classic import bird_base
 from foldforge.design.skeleton import (
@@ -58,6 +59,7 @@ __all__ = [
     "design_base",
     "flap_length_errors",
     "folded_schematic",
+    "reduced_dist",
     "bird_base",
     "tree_from_mask",
     "tree_from_image",

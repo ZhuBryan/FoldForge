@@ -447,13 +447,20 @@ def _incircle_flaps_ok(Q: np.ndarray, rho: np.ndarray, tol: float = 1e-7):
     return True, ic
 
 
-def _um_fill(Q, rho, outer, creases):
+def _um_fill(Q, rho, outer, creases, leaf_ids):
     """Recursively emit the universal-molecule creases of one active polygon.
 
     ``outer[k]`` is the paper-border tangent point that edge ``k``'s hinge must
     reach (``None`` for a gusset edge, whose hinge stops at its own tangent
     point). Appends ``(p0, p1, kind)`` segments; the arrangement is planarised by
     the caller.
+
+    ``leaf_ids[k]`` is the disc (leaf) row index that active-polygon vertex ``k``
+    came from - a parallel array carried alongside ``Q``/``rho`` so any point in
+    the recursion knows which leaf each corner is. It is purely bookkeeping here
+    (Stage 1): it does not touch the geometry. A gusset split reuses the two
+    existing corner vertices as the diagonal's endpoints, so each sub-polygon
+    inherits its corners' leaf ids directly via ``leaf_ids[idx]``.
     """
     m = len(Q)
     if m == 3:
@@ -510,7 +517,7 @@ def _um_fill(Q, rho, outer, creases):
                 sub_outer.append(tg)                # gusset edge: hinge to gusset tangent
             else:
                 sub_outer.append(outer[a])          # inherit the border tangent
-        _um_fill(Qn[idx], rhon[idx], sub_outer, creases)
+        _um_fill(Qn[idx], rhon[idx], sub_outer, creases, leaf_ids[idx])
 
 
 def _seg_split_params(a, b, c, d):
@@ -650,6 +657,18 @@ def _reduced_dist(packing: Packing, i: int, j: int) -> float:
         packing.leaves[i], packing.leaves[j])
 
 
+def reduced_dist(packing: Packing, i: int, j: int) -> float:
+    """Reduced target distance between disc rows ``i`` and ``j``.
+
+    Public alias for :func:`_reduced_dist`: ``scale * treepath(leaf_i, leaf_j)``.
+    For hull-adjacent leaves of a *star* tree this equals ``r_i + r_j`` (the
+    tangent-disc length); Stage 2 relies on that invariant. Defined and tested
+    here but not yet wired into any tightness decision (Stage 1 = no behaviour
+    change).
+    """
+    return _reduced_dist(packing, i, j)
+
+
 def _hull_river_widths(packing: Packing, hidx: list[int]) -> list[float]:
     """River band width left open on each convex-hull edge (0 == tangent pair).
 
@@ -702,8 +721,13 @@ def _universal_pattern(packing: Packing, hidx: list[int]) -> CreasePattern:
         borders.append((Q0[k], foot, "B"))
         borders.append((foot, Q0[(k + 1) % m], "B"))
 
+    # Per-vertex leaf (disc) row index for every active-polygon corner: each hull
+    # vertex is exactly the disc `hidx[k]`. Threaded through the recursion so any
+    # sub-polygon corner still knows its leaf (Stage 1: bookkeeping only, no
+    # geometry change).
+    leaf_ids = np.asarray(hidx)
     creases: list = []
-    _um_fill(Q0, r0, outer, creases)
+    _um_fill(Q0, r0, outer, creases, leaf_ids)
     creases += borders
 
     # Planarise: leaf centres are added first so their row indices are 0..N-1.

@@ -150,6 +150,26 @@ def test_single_spine_river_folds_flat():
     assert len(pattern.faces) > 0                   # faces populated for the viewer
 
 
+@pytest.mark.parametrize("name", ["three-flap", "four-flap", "five-flap"])
+def test_reduced_dist_equals_radii_sum_on_star_hull(name):
+    """Stage-2 invariant: on a star tree every hull-adjacent leaf pair is tangent.
+
+    ``reduced_dist == scale*treepath`` must equal ``r_i + r_j`` for each convex-
+    hull edge of a packed star base (no river band). This pins the equality the
+    later river work relies on; it is not yet used in any tightness decision.
+    """
+    from scipy.spatial import ConvexHull
+    from foldforge.design import reduced_dist
+
+    packing = pack_tree(get_tree(name))
+    hidx = [int(i) for i in ConvexHull(packing.centers).vertices]
+    m = len(hidx)
+    for k in range(m):
+        i, j = hidx[k], hidx[(k + 1) % m]
+        rd = reduced_dist(packing, i, j)
+        assert rd == pytest.approx(packing.radii[i] + packing.radii[j], abs=1e-9)
+
+
 def test_asymmetric_river_is_honestly_partial():
     """Honest ceiling: asymmetric / many-leaf rivers do NOT fully fold yet.
 
