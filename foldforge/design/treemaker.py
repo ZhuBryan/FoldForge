@@ -449,7 +449,61 @@ def _incircle_flaps_ok(Q: np.ndarray, rho: np.ndarray, tol: float = 1e-7):
     return True, ic
 
 
-def _um_fill(Q, rho, outer, creases, leaf_ids, packing):
+def _river_split(Q: np.ndarray, offs: np.ndarray):
+    """Detect a river-contraction (spine) event on the current active polygon.
+
+    A *river edge* is a polygon edge ``k = (k, k+1)`` whose band ``offs`` is
+    positive: the two leaf discs on it are held apart by more than ``r_i + r_j``
+    (a spine crosses between them), so the edge is cut at ``r_i`` / ``r_j`` with a
+    band left open in the middle. A single-spine river has exactly two such edges
+    - the two sides of one band. Insetting the polygon at unit speed slides those
+    two river lines inward until they meet: the band pinches to the **spine**, a
+    segment joining the two sub-hub incentres. Each sub-hub is the incentre of the
+    lines bounding its side *including both river lines* (so it lies on the band's
+    mid-line and every wedge at it is a bisector pair - Kawasaki holds).
+
+    Returns ``(t, e0, e1, grpA, grpB, C0, C1)`` where ``t`` is the inset time the
+    band closes (== the sub-hub inradius, since an edge insets at unit speed), or
+    ``None`` when there is no clean single-spine river (0 or >2 river edges, the
+    two sub-hubs disagree, or the incentre fit is not tangent). A ``None`` keeps
+    the caller on the ordinary gusset path, so stars are untouched.
+    """
+    m = len(Q)
+    river_edges = [k for k in range(m) if offs[k, (k + 1) % m] > 1e-9]
+    if len(river_edges) != 2:
+        return None                                 # not a single-spine river
+    e0, e1 = river_edges
+
+    def arc(a, b):                                  # vertices strictly between edges
+        out, k = [], (a + 1) % m
+        while True:
+            out.append(k)
+            if k == b:
+                break
+            k = (k + 1) % m
+        return out
+
+    grpA, grpB = arc(e0, e1), arc(e1, e0)
+    centroid = Q.mean(axis=0)
+    rl0 = _line_normal(Q[e0], Q[(e0 + 1) % m])
+    rl1 = _line_normal(Q[e1], Q[(e1 + 1) % m])
+
+    def hub(grp):
+        lines = [rl0, rl1]                          # both river lines constrain each side
+        for k in grp:
+            nk = (k + 1) % m
+            if offs[k, nk] <= 1e-9 and nk in grp:   # that side's own tight border edges
+                lines.append(_line_normal(Q[k], Q[nk]))
+        return _incenter_of_lines(lines, centroid)
+
+    C0, R0, res0 = hub(grpA)
+    C1, R1, res1 = hub(grpB)
+    if max(res0, res1) > 1e-6 or abs(R0 - R1) > 1e-6:
+        return None                                 # not a clean tangent single spine
+    return 0.5 * (R0 + R1), e0, e1, grpA, grpB, C0, C1
+
+
+def _um_fill(Q, rho, outer, creases, leaf_ids, packing, river_info=None):
     """Recursively emit the universal-molecule creases of one active polygon.
 
     ``outer[k]`` is the paper-border tangent point that edge ``k``'s hinge must
@@ -499,7 +553,41 @@ def _um_fill(Q, rho, outer, creases, leaf_ids, packing):
             creases.append((Q[k], Q[(k + 1) % m], "edge"))
         return
 
+    # River-contraction (spine) event: a band bounded by two river edges pinches
+    # to a spine before any transversal pair tightens. In the symmetric single
+    # spine this fires where the ordinary gusset quadratic only grazes (a double
+    # root), so it must be checked explicitly - otherwise the polygon wrongly
+    # falls through to one incircle. Fire it when it is the earliest event.
     event = _first_gusset_event(Q, rho, offs)
+    river = _river_split(Q, offs)
+    if river is not None and (event is None or river[0] <= event[0] + 1e-9):
+        t, e0, e1, grpA, grpB, C0, C1 = river
+        setA = set(grpA)
+        hub_of = lambda v: C0 if v in setA else C1
+        for k in grpA:
+            creases.append((Q[k], C0, "ridge"))     # leaf ridges to its sub-hub
+        for k in grpB:
+            creases.append((Q[k], C1, "ridge"))
+        creases.append((C0, C1, "ridge"))           # the spine crease (river core)
+        for k in range(m):
+            i, j = k, (k + 1) % m
+            u = Q[j] - Q[i]
+            u = u / np.linalg.norm(u)
+            fi, fj = Q[i] + rho[i] * u, Q[j] - rho[j] * u  # feet cut at r_i / r_j
+            creases.append((hub_of(i), fi, "hinge"))       # feet hinge to their hub
+            creases.append((hub_of(j), fj, "hinge"))
+            creases.append((Q[i], Q[j], "edge"))
+        if river_info is not None:
+            # Record the geometric spine so the caller can read the honest flap
+            # length of every far-side leaf (its terminal cut plus this spine it
+            # crosses to reach the root). Root-side leaves cross no spine.
+            sl = float(np.linalg.norm(C0 - C1))
+            far = [int(leaf_ids[k]) for grp in (grpA, grpB) for k in grp
+                   if packing.tree.parent_hub(packing.leaves[int(leaf_ids[k])])
+                   != packing.tree.root]
+            river_info.append((sl, far))
+        return
+
     if event is None:                               # degenerate guard: fill as incircle
         ic, _, _ = _incircle(Q)
         for k in range(m):
@@ -542,7 +630,8 @@ def _um_fill(Q, rho, outer, creases, leaf_ids, packing):
                 sub_outer.append(tg)                # gusset edge: hinge to gusset tangent
             else:
                 sub_outer.append(outer[a])          # inherit the border tangent
-        _um_fill(Qn[idx], rhon[idx], sub_outer, creases, leaf_ids[idx], packing)
+        _um_fill(Qn[idx], rhon[idx], sub_outer, creases, leaf_ids[idx], packing,
+                 river_info)
 
 
 def _seg_split_params(a, b, c, d):
@@ -741,10 +830,12 @@ def _universal_pattern(packing: Packing, hidx: list[int]) -> CreasePattern:
     for k in range(m):
         d = Q0[(k + 1) % m] - Q0[k]
         d = d / np.linalg.norm(d)
-        foot = Q0[k] + d * r0[k]                    # disc tangent point on the border
-        outer.append(foot)
-        borders.append((Q0[k], foot, "B"))
-        borders.append((foot, Q0[(k + 1) % m], "B"))
+        fi = Q0[k] + d * r0[k]                      # near corner's tangent point
+        fj = Q0[(k + 1) % m] - d * r0[(k + 1) % m]  # far corner's tangent point
+        outer.append(fi)
+        borders.append((Q0[k], fi, "B"))
+        borders.append((fi, fj, "B"))               # river band (zero-length on a star)
+        borders.append((fj, Q0[(k + 1) % m], "B"))
 
     # Per-vertex leaf (disc) row index for every active-polygon corner: each hull
     # vertex is exactly the disc `hidx[k]`. Threaded through the recursion so any
@@ -752,7 +843,8 @@ def _universal_pattern(packing: Packing, hidx: list[int]) -> CreasePattern:
     # geometry change).
     leaf_ids = np.asarray(hidx)
     creases: list = []
-    _um_fill(Q0, r0, outer, creases, leaf_ids, packing)
+    river_info: list = []
+    _um_fill(Q0, r0, outer, creases, leaf_ids, packing, river_info)
     creases += borders
 
     # Planarise: leaf centres are added first so their row indices are 0..N-1.
@@ -797,12 +889,29 @@ def _universal_pattern(packing: Packing, hidx: list[int]) -> CreasePattern:
     interior = scratch.interior_vertices()
     assign, _resid = _assign_mountain_valley(edges, assign, interior)
     faces = _extract_faces(verts, edges)
+    metadata = {"name": f"treemaker:{packing.tree.name}"}
+    if river_info:
+        # Honest geometric flap lengths for a river base: each leaf's border cut
+        # plus every spine it crosses to reach the root. Read straight off the
+        # built geometry (spine == |C0 - C1|), so this verifies the fold, it does
+        # not assume it. Stars emit no river_info and keep the recompute path.
+        pat0 = CreasePattern(vertices=verts, edges=edges, assignment=list(assign),
+                             faces=faces, metadata={})
+        flap = np.full(len(packing.leaves), np.nan)
+        for gi in range(len(packing.leaves)):
+            b = [e for e in pat0.incident_edges(gi) if pat0.assignment[e] == "B"]
+            if not b:
+                continue
+            base = min(float(np.linalg.norm(verts[edges[e][0]] - verts[edges[e][1]]))
+                       for e in b)
+            flap[gi] = base + sum(sl for sl, far in river_info if gi in far)
+        metadata["flap_lengths"] = flap
     return CreasePattern(
         vertices=verts,
         edges=edges,
         assignment=assign,
         faces=faces,
-        metadata={"name": f"treemaker:{packing.tree.name}"},
+        metadata=metadata,
     )
 
 
@@ -829,124 +938,6 @@ def _incenter_of_lines(lines, interior_pt):
     A = np.array(A); b = np.array(b)
     sol, *_ = np.linalg.lstsq(A, b, rcond=None)
     return sol[:2], float(sol[2]), float(np.max(np.abs(A @ sol - b)))
-
-
-def _river_pattern(packing: Packing, hidx: list[int], widths: list[float]):
-    """Universal molecule for a *single-spine* river (a body with two sub-hubs).
-
-    The packed hull is a tangent polygon with exactly two *river* edges (the
-    ``widths[k] > 0`` sides of the band between the sub-hubs). Insetting the hull
-    at unit speed, each sub-hub's flaps collapse to one interior node
-    (``C0`` for the root hub, ``C1`` for the far hub) and the two nodes are joined
-    by a single spine crease of length ``scale * spine`` - the river band folds as
-    a flat pleat between them. Concretely:
-
-        * ``C0`` / ``C1`` are the incentres of the lines bounding each sub-hub
-          (that hub's own border edges *plus* the two shared river edges), so
-          every wedge at them is a bisector pair and Kawasaki holds;
-        * each leaf corner gets a ridge to its hub node, each border tangent
-          point a hinge to its hub node, and the two hub nodes share the spine
-          ridge;
-        * border edges are still cut at ``r_i`` (each leaf's terminal edge), so a
-          root-side flap length is ``r_i`` and a far-side flap length is
-          ``r_i + scale*spine`` - both exact.
-
-    Returns ``(pattern, ok)``. ``ok`` is the honest self-check: True only when the
-    built pattern actually passes Kawasaki + Maekawa at every interior vertex and
-    reproduces every flap length. The caller falls back to the partial base when
-    ``ok`` is False (asymmetric / many-leaf / multi-junction rivers, which need
-    the extra gusset nodes this two-node construction does not emit).
-    """
-    from foldforge.geometry.foldability import foldability_report
-
-    pts = packing.centers
-    m = len(hidx)
-    Q = pts[hidx].copy()
-    r = packing.radii[hidx].copy()
-    river = [k for k in range(m) if widths[k] > 1e-6]
-    if len(river) != 2:
-        return None, False
-    e0, e1 = river
-
-    def arc(a, b):                              # hull vertices strictly between edges
-        out, k = [], (a + 1) % m
-        while True:
-            out.append(k)
-            if k == b:
-                break
-            k = (k + 1) % m
-        return out
-
-    grpA = arc(e0, e1)                          # one sub-hub's leaves
-    grpB = arc(e1, e0)                          # the other's
-    centroid = Q.mean(axis=0)
-
-    def hub_node(grp):
-        lines = [_line_normal(Q[e0], Q[(e0 + 1) % m]),
-                 _line_normal(Q[e1], Q[(e1 + 1) % m])]
-        for k in grp:
-            nk = (k + 1) % m
-            if widths[k] <= 1e-6 and k in grp and nk in grp:
-                lines.append(_line_normal(Q[k], Q[nk]))
-        return _incenter_of_lines(lines, centroid)
-
-    C0, _rad0, res0 = hub_node(grpA)
-    C1, _rad1, res1 = hub_node(grpB)
-
-    # border tangent feet: each edge cut at r_i from its own corner (a band of
-    # width == widths[k] is left between the two feet of a river edge).
-    feet = []
-    for k in range(m):
-        i, j = k, (k + 1) % m
-        u = (Q[j] - Q[i]); u = u / np.linalg.norm(u)
-        feet.append((Q[i] + r[i] * u, Q[j] - r[j] * u))
-
-    def hub_of(vtx):
-        return C0 if vtx in grpA else C1
-
-    creases: list = []
-    for k in range(m):
-        i, j = k, (k + 1) % m
-        fi, fj = feet[k]
-        creases.append((Q[i], fi, "B"))
-        creases.append((fj, Q[j], "B"))
-        if widths[k] > 1e-6:
-            creases.append((fi, fj, "B"))       # the river band on the paper edge
-    for k in grpA:
-        creases.append((Q[k], C0, "ridge"))
-    for k in grpB:
-        creases.append((Q[k], C1, "ridge"))
-    creases.append((C0, C1, "ridge"))           # the spine crease (river core)
-    for k in range(m):
-        i, j = k, (k + 1) % m
-        fi, fj = feet[k]
-        creases.append((hub_of(i), fi, "hinge"))
-        creases.append((hub_of(j), fj, "hinge"))
-
-    pattern = _planarise(packing, creases)
-
-    # honest self-check: Kawasaki + Maekawa everywhere and flap lengths exact.
-    report = foldability_report(pattern)
-    ok = all(v.kawasaki and v.maekawa for v in report.vertices)
-    # flap lengths: root-side == r_i, far-side == r_i + spine crease length.
-    spine_len = float(np.linalg.norm(C0 - C1))
-    flap = np.full(len(packing.leaves), np.nan)
-    for gi in range(len(packing.leaves)):
-        b_edges = [e for e in pattern.incident_edges(gi)
-                   if pattern.assignment[e] == "B"]
-        if not b_edges:
-            continue
-        halves = [float(np.linalg.norm(pattern.vertices[pattern.edges[e][0]]
-                                       - pattern.vertices[pattern.edges[e][1]]))
-                  for e in b_edges]
-        base = min(halves)
-        hub = packing.tree.parent_hub(packing.leaves[gi])
-        flap[gi] = base + (0.0 if hub == packing.tree.root else spine_len)
-    target = packing.flap_targets
-    err = np.abs(flap - target) / np.maximum(target, 1e-9)
-    ok = ok and bool(np.nanmax(err) < 0.02)
-    pattern.metadata["flap_lengths"] = flap
-    return pattern, ok
 
 
 def _planarise(packing: Packing, creases: list) -> CreasePattern:
@@ -1028,7 +1019,16 @@ def crease_pattern(packing: Packing) -> CreasePattern:
         if n_river == 0:
             return _universal_pattern(packing, hidx)
         if n_river == 2:
-            pattern, ok = _river_pattern(packing, hidx, widths)
+            # The unified molecule's river-contraction event emits the spine for a
+            # single-spine river, so route it through _um_fill like a star. Keep
+            # the honest self-check: an asymmetric river the event cannot close
+            # falls back to the partial base rather than faking a flat fold.
+            from foldforge.geometry.foldability import foldability_report
+            pattern = _universal_pattern(packing, hidx)
+            report = foldability_report(pattern)
+            ok = bool(report.vertices) and all(
+                v.kawasaki and v.maekawa for v in report.vertices)
+            ok = ok and float(np.nanmax(flap_length_errors(packing, pattern))) < 0.02
             if ok:
                 return pattern
     return _rabbit_ear_pattern(packing)
