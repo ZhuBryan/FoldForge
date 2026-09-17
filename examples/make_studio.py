@@ -426,6 +426,7 @@ DESIGN_SPECS = [
     ("four-flap", "Four-flap base", True),
     ("five-flap", "Five-flap base", True),
     ("river-four", "River base (body + limbs)", True),
+    ("river-mirror", "River base (uneven limbs)", True),
 ]
 
 _CP_COLORS = {"M": "#ff6b6b", "V": "#5b9bd5", "B": "#97a1b0", "F": "#5a6472"}

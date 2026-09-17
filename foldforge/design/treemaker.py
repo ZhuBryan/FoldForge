@@ -52,14 +52,25 @@ Honest scope (see ``crease_pattern`` and the tests):
       edge (not its full path to the root), so two leaves sharing a hub stay
       tangent and the spine shows up only as the extra path-distance that spaces
       cross-river leaves apart - a clean open river band, no overlap. The
-      molecule handles the **single-spine** river (``river-four``: two flaps off
-      each of two sub-hubs) end to end: it insets to two hub nodes joined by one
-      spine crease, and every interior vertex passes Kawasaki + Maekawa with exact
-      flap lengths (root-side ``r_i``, far-side ``r_i + scale*spine``). It is built
-      behind an honest self-check, so *asymmetric*, *many-leaf* and *multi-junction*
-      rivers - which need the extra gusset nodes this two-node construction does
-      not emit - fail the check and fall back to the partial rabbit-ear base
-      rather than claim a fold they do not achieve.
+      molecule handles the **single-spine** river end to end whenever each side of
+      the spine is one clean tangent fan whose incircle touch lengths equal its
+      flap radii: it insets to two sub-hub nodes joined by one spine crease, and
+      every interior vertex passes Kawasaki + Maekawa with exact flap lengths
+      (root-side ``r_i``, far-side ``r_i + scale*spine``). This covers equal flaps
+      (``river-four``) *and* unequal-but-mirror-symmetric flaps (``river-mirror``:
+      left ``[1.1, 0.9]`` mirroring right ``[0.9, 1.1]``) - the asymmetric-flap
+      river now folds. It is built behind an honest self-check, so the harder
+      topologies still fall back to the partial rabbit-ear base rather than fake a
+      fold:
+        - a *fully* asymmetric single spine (unequal flaps AND unequal sides,
+          ``river-asym``) - a single sub-hub incircle cannot match both the flap
+          length and Kawasaki, so the side needs an internal gusset the one spine
+          event does not emit; many such trees also pack with a floating disc so
+          the hull is not even reduced-tight;
+        - a *multi-junction* (>=3 hub) river (``river-caterpillar``) - its packed
+          hull exposes more than two river edges, so the single-band spine event
+          resolves one band but not the interior junction (a Y-junction / nested
+          spine event is not implemented).
 
     from foldforge.design.treemaker import get_tree, design_base
     packing, pattern = design_base(get_tree("four-flap"))
@@ -153,9 +164,13 @@ def river_tree(spine: float, left: list[float], right: list[float],
     Node 0 and node 1 are hubs joined by an edge of length ``spine``; ``left``
     hangs off hub 0 and ``right`` off hub 1. Leaves on opposite hubs are
     separated by the spine, which the packing honours by leaving an open river
-    band between them. A *single-spine, symmetric* river (e.g. two equal flaps
-    off each hub) folds flat end to end; asymmetric or many-leaf variants pack
-    cleanly but fall back to the honest partial base (see the module docstring).
+    band between them. A single-spine river folds flat end to end whenever each
+    side of the spine is one clean tangent fan whose incircle touch lengths equal
+    its flap radii - equal flaps, or unequal-but-mirror-symmetric flaps. A *fully*
+    asymmetric single spine (unequal flaps and unequal sides) or a multi-junction
+    river packs cleanly but falls back to the honest partial base, because a side
+    would then need an internal gusset the single spine event does not emit (see
+    the module docstring / Stage 3 boundary).
     """
     edges = [(0, 1, spine)]
     nid = 2
@@ -180,6 +195,25 @@ BUILTIN_TREES = {
     # Packs with a clean open river band between the hubs and folds flat end to
     # end - the single-spine river molecule (two hub nodes + one spine crease).
     "river-four": river_tree(0.5, [1.0, 1.0], [1.0, 1.0], "river-four"),
+    # A single spine with *unequal* flaps on each hub, arranged mirror-symmetric
+    # (left [1.1, 0.9] mirrors right [0.9, 1.1]). Each side is still one clean
+    # tangent fan whose incircle touch lengths equal the flap radii, so the spine
+    # event closes it flat end to end - the asymmetric-flap river that folds.
+    "river-mirror": river_tree(0.5, [1.1, 0.9], [0.9, 1.1], "river-mirror"),
+    # A *fully* asymmetric single spine (unequal flaps AND unequal sides). Packs
+    # with a floating disc so the hull is not reduced-tight; even where such a
+    # river packs tight, one sub-hub incircle cannot match both flap length and
+    # Kawasaki, so it needs an internal gusset the spine event does not emit -
+    # an honest partial base (see the module docstring / Stage 3 boundary).
+    "river-asym": river_tree(0.5, [1.2, 0.8], [1.0, 0.9], "river-asym"),
+    # A multi-junction "caterpillar": leaves - hubA =spine= hubB =spine= hubC -
+    # leaves (three hubs, two spines). The hull exposes more than two river edges,
+    # so the single-band spine event does not resolve the interior junction; it
+    # packs cleanly but folds only partially (Stage 3 honest boundary).
+    "river-caterpillar": MetricTree(
+        edges=[(0, 1, 0.5), (1, 2, 0.5),
+               (0, 3, 1.0), (0, 4, 1.0), (1, 5, 0.8), (2, 6, 1.0), (2, 7, 1.0)],
+        root=1, name="river-caterpillar"),
 }
 
 
@@ -498,8 +532,13 @@ def _river_split(Q: np.ndarray, offs: np.ndarray):
 
     C0, R0, res0 = hub(grpA)
     C1, R1, res1 = hub(grpB)
-    if max(res0, res1) > 1e-6 or abs(R0 - R1) > 1e-6:
-        return None                                 # not a clean tangent single spine
+    if max(res0, res1) > 1e-6:
+        return None                                 # a side is not a clean tangent fan
+    # Each side's sub-hub is the incentre of its own lines (both river lines plus
+    # that side's tight borders), so the two inradii R0, R1 need not match: an
+    # *asymmetric* single spine simply has two differently sized sub-fans joined by
+    # the spine ``C0-C1``. Kawasaki still holds at each sub-hub (it is a bisector
+    # fan of its lines) whatever the sizes, so no equal-inradius assumption is made.
     return 0.5 * (R0 + R1), e0, e1, grpA, grpB, C0, C1
 
 
@@ -553,14 +592,18 @@ def _um_fill(Q, rho, outer, creases, leaf_ids, packing, river_info=None):
             creases.append((Q[k], Q[(k + 1) % m], "edge"))
         return
 
-    # River-contraction (spine) event: a band bounded by two river edges pinches
-    # to a spine before any transversal pair tightens. In the symmetric single
-    # spine this fires where the ordinary gusset quadratic only grazes (a double
-    # root), so it must be checked explicitly - otherwise the polygon wrongly
-    # falls through to one incircle. Fire it when it is the earliest event.
+    # River-contraction (spine) event: a band bounded by exactly two river edges,
+    # each side of which is a clean tangent fan, pinches to a spine joining the two
+    # sub-hub incentres. This is the correct flat-foldable molecule for a single
+    # spine (symmetric or not), so it takes priority over the ordinary gusset
+    # quadratic: on a symmetric river the diagonal gusset is only a grazing double
+    # root, and on an asymmetric one the diagonal split would break the bisector
+    # structure the sub-hub construction preserves. ``_river_split`` returns None
+    # (0 or >2 river edges, or a side that is not one tangent fan), which keeps
+    # stars and multi-junction sub-polygons on the gusset/recursion path below.
     event = _first_gusset_event(Q, rho, offs)
     river = _river_split(Q, offs)
-    if river is not None and (event is None or river[0] <= event[0] + 1e-9):
+    if river is not None:
         t, e0, e1, grpA, grpB, C0, C1 = river
         setA = set(grpA)
         hub_of = lambda v: C0 if v in setA else C1
@@ -1018,19 +1061,20 @@ def crease_pattern(packing: Packing) -> CreasePattern:
         n_river = sum(1 for w in widths if w > 1e-6)
         if n_river == 0:
             return _universal_pattern(packing, hidx)
-        if n_river == 2:
-            # The unified molecule's river-contraction event emits the spine for a
-            # single-spine river, so route it through _um_fill like a star. Keep
-            # the honest self-check: an asymmetric river the event cannot close
-            # falls back to the partial base rather than faking a flat fold.
-            from foldforge.geometry.foldability import foldability_report
-            pattern = _universal_pattern(packing, hidx)
-            report = foldability_report(pattern)
-            ok = bool(report.vertices) and all(
-                v.kawasaki and v.maekawa for v in report.vertices)
-            ok = ok and float(np.nanmax(flap_length_errors(packing, pattern))) < 0.02
-            if ok:
-                return pattern
+        # A river hull (two river edges for a single spine, more for a
+        # multi-junction path): route it through the same unified molecule, whose
+        # recursion fires a spine event at each river band. Keep the honest
+        # self-check - a river the molecule cannot close flat (an asymmetric fan,
+        # or a junction the spine events do not resolve) falls back to the partial
+        # base rather than faking a flat fold.
+        from foldforge.geometry.foldability import foldability_report
+        pattern = _universal_pattern(packing, hidx)
+        report = foldability_report(pattern)
+        ok = bool(report.vertices) and all(
+            v.kawasaki and v.maekawa for v in report.vertices)
+        ok = ok and float(np.nanmax(flap_length_errors(packing, pattern))) < 0.02
+        if ok:
+            return pattern
     return _rabbit_ear_pattern(packing)
 
 

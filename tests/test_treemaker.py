@@ -150,6 +150,42 @@ def test_single_spine_river_folds_flat():
     assert len(pattern.faces) > 0                   # faces populated for the viewer
 
 
+def test_mirror_asymmetric_single_spine_river_folds_flat():
+    """Stage 3: a single spine with *unequal* flaps per hub folds flat when the
+    two sides are mirror-symmetric (left [1.1, 0.9] mirrors right [0.9, 1.1]).
+
+    Each side is still one clean tangent fan whose incircle touch lengths equal
+    the flap radii, so the spine event closes it flat end to end. This pins the
+    asymmetric-flap river that the generalised spine event now folds - a case the
+    Stage 2b symmetric-only molecule left partial.
+    """
+    packing, pattern = design_base(get_tree("river-mirror"))
+    report = foldability_report(pattern)
+    assert len(report.vertices) == 2                # the two sub-hub nodes
+    assert report.flat_foldable
+    for v in report.vertices:
+        assert v.kawasaki is True, f"vertex {v.vertex} fails Kawasaki"
+        assert v.maekawa is True, f"vertex {v.vertex} fails Maekawa"
+    err = flap_length_errors(packing, pattern)
+    assert err.max() < 0.02, f"river-mirror flap error {err.max():.4f}"
+    assert len(pattern.faces) > 0
+
+
+def test_multijunction_river_is_honestly_partial():
+    """Stage 3 boundary: a multi-junction (>=3 hub) river does NOT fully fold.
+
+    The 'caterpillar' has two spines, so the packed hull exposes more than two
+    river edges; the single-band spine event resolves one band but not the
+    interior junction, so the self-check fails and it falls back to the partial
+    base. Pins the honest ceiling so a faked flat fold would fail loudly.
+    """
+    packing, pattern = design_base(get_tree("river-caterpillar"))
+    report = foldability_report(pattern)
+    passes = all(v.kawasaki and v.maekawa for v in report.vertices)
+    assert not passes, "multi-junction river unexpectedly folds flat - update claims"
+    assert len(report.vertices) > 0                 # it still builds a real pattern
+
+
 @pytest.mark.parametrize("name", ["three-flap", "four-flap", "five-flap"])
 def test_reduced_dist_equals_radii_sum_on_star_hull(name):
     """Stage-2 invariant: on a star tree every hull-adjacent leaf pair is tangent.
