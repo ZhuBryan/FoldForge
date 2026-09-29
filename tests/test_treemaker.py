@@ -207,12 +207,21 @@ def test_reduced_dist_equals_radii_sum_on_star_hull(name):
 
 
 def test_asymmetric_river_is_honestly_partial():
-    """Honest ceiling: asymmetric / many-leaf rivers do NOT fully fold yet.
+    """Honest ceiling: a fully-asymmetric single spine does NOT fully fold yet.
 
-    The two-node river molecule only closes for the symmetric single-spine case;
-    asymmetric sub-hubs need extra gusset nodes it does not emit, so the self-
-    check fails and it falls back to the partial base. This pins that boundary so
-    a regression that silently 'fixed' or faked it would fail loudly.
+    Stage 4 diagnosed this precisely: each leaf has its own "natural" hub point
+    (fixed purely by its own rho and its two incident edge directions - the
+    intersection of the perpendiculars raised at its rho-cut border feet). A
+    single sub-hub per side only works when a side's leaves' natural points
+    coincide (equal flaps, or the packing-forced mirror-symmetric case);
+    river-asym's four natural points are all ~0.2 apart, an order of magnitude
+    past the ~0.11 target spine length, so no single incircle can serve as that
+    side's hub. Closing this needs both an internal gusset AND a packing that
+    places the river band at the angle that gusset implies (``pack_tree`` only
+    enforces pairwise distances today) - beyond the molecule alone, so the
+    self-check fails and it falls back to the partial base. This pins that
+    boundary so a regression that silently 'fixed' or faked it would fail
+    loudly.
     """
     from foldforge.design.treemaker import river_tree, design_base
     tree = river_tree(0.5, [1.2, 0.8], [1.0, 0.9], "river-asym")

@@ -1,11 +1,16 @@
-"""Proof image for the general river work (Stage 3).
+"""Proof image for the general river work (Stage 3, gate relaxed in Stage 4).
 
 Runs every built-in river base end to end and draws, for each, its circle
 packing (river bands shaded), its crease pattern (mountain/valley/border, spine
 creases thickened, sub-hub nodes ringed) and an honest Kawasaki / Maekawa / flap
 verdict. Two of the four fold flat end to end (the symmetric and the
 mirror-symmetric single spine); the fully asymmetric and the multi-junction
-rivers are honest partials, and the panel says so per tree.
+rivers are honest partials, and the panel says so per tree. Stage 4 removed the
+separate "is the hull reduced-tight" pre-check (``river-asym`` packs with one
+benign slack edge, not just river bands) so every disc-on-hull packing now gets
+a genuine attempt at the universal molecule before falling back - it still
+falls back for ``river-asym``, precisely diagnosed as needing an internal
+gusset *and* a packing change (see the module docstring), not faked.
 
     python examples/treemaker_river_general.py
 
@@ -91,7 +96,7 @@ def _crease_panel(ax, pattern):
 def main():
     os.makedirs(OUT, exist_ok=True)
     fig, axes = plt.subplots(len(RIVERS), 2, figsize=(9.5, 4.3 * len(RIVERS)))
-    print("General river bases (Stage 3):")
+    print("General river bases (Stage 4):")
     for row, (name, desc) in enumerate(RIVERS):
         packing, pattern, err, (n, nk, nm), works = _stats(name)
         _packing_panel(axes[row, 0], packing)

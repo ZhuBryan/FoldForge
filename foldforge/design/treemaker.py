@@ -59,14 +59,37 @@ Honest scope (see ``crease_pattern`` and the tests):
       (root-side ``r_i``, far-side ``r_i + scale*spine``). This covers equal flaps
       (``river-four``) *and* unequal-but-mirror-symmetric flaps (``river-mirror``:
       left ``[1.1, 0.9]`` mirroring right ``[0.9, 1.1]``) - the asymmetric-flap
-      river now folds. It is built behind an honest self-check, so the harder
-      topologies still fall back to the partial rabbit-ear base rather than fake a
-      fold:
+      river now folds. The routing (``crease_pattern``) no longer requires a
+      *reduced-tight* hull first: every disc-on-hull packing (river or not, tight
+      or genuinely slack) is filled with the one universal molecule and then
+      *always* self-verified (Kawasaki + Maekawa at every interior vertex, flap
+      error < 2%) before being returned - a benign packing slack edge (a hull
+      edge the optimiser simply left room on, not a river) is handled by the
+      *same* border-tangent-foot geometry as a river band, with no separate
+      "is this edge tight" gate at all; only the tree (an edge whose endpoints
+      are both internal hub nodes) - not the size of the gap - decides whether
+      an edge is a spine that fires the sub-hub/spine-crease event. It is still
+      built behind the honest self-check, so the harder topologies fall back to
+      the partial rabbit-ear base rather than fake a fold:
         - a *fully* asymmetric single spine (unequal flaps AND unequal sides,
-          ``river-asym``) - a single sub-hub incircle cannot match both the flap
-          length and Kawasaki, so the side needs an internal gusset the one spine
-          event does not emit; many such trees also pack with a floating disc so
-          the hull is not even reduced-tight;
+          ``river-asym``) - diagnosed precisely (Stage 4): the two leaves at
+          each end of a river band each have their *own* natural hub point (the
+          intersection of the two perpendiculars raised at their rho-cut
+          border-tangent feet), fixed purely by that leaf's own rho and its two
+          incident edge directions. A single sub-hub can only work when a side's
+          leaves' natural hub points coincide (equal flaps, or the mirror case,
+          where the packing's own symmetry forces that); the fully-asymmetric
+          packing has no such symmetry, so ``river-asym``'s four natural hub
+          points are all different (by ~0.19-0.24, an order of magnitude past
+          the ~0.11 target spine length - not a small numerical residual). One
+          sub-hub incircle per side (the current construction) then satisfies
+          neither Kawasaki nor the true spine length at *either* hub. Reconciling
+          this needs the two mismatched natural points on a side joined by their
+          own internal gusset *and* the packing itself to place the river band
+          at the angle that gusset implies (today's ``pack_tree`` only enforces
+          pairwise distances, never the angle a straight single-crease spine
+          needs) - a change to the packing's optimisation, not just the molecule,
+          and out of this stage's bounded scope;
         - a *multi-junction* (>=3 hub) river (``river-caterpillar``) - its packed
           hull exposes more than two river edges, so the single-band spine event
           resolves one band but not the interior junction (a Y-junction / nested
@@ -169,8 +192,9 @@ def river_tree(spine: float, left: list[float], right: list[float],
     its flap radii - equal flaps, or unequal-but-mirror-symmetric flaps. A *fully*
     asymmetric single spine (unequal flaps and unequal sides) or a multi-junction
     river packs cleanly but falls back to the honest partial base, because a side
-    would then need an internal gusset the single spine event does not emit (see
-    the module docstring / Stage 3 boundary).
+    would then need an internal gusset the single spine event does not emit *and*
+    the packing itself would need to place the river band at the angle that
+    gusset implies (see the module docstring / Stage 4 boundary).
     """
     edges = [(0, 1, spine)]
     nid = 2
@@ -201,10 +225,15 @@ BUILTIN_TREES = {
     # event closes it flat end to end - the asymmetric-flap river that folds.
     "river-mirror": river_tree(0.5, [1.1, 0.9], [0.9, 1.1], "river-mirror"),
     # A *fully* asymmetric single spine (unequal flaps AND unequal sides). Packs
-    # with a floating disc so the hull is not reduced-tight; even where such a
-    # river packs tight, one sub-hub incircle cannot match both flap length and
-    # Kawasaki, so it needs an internal gusset the spine event does not emit -
-    # an honest partial base (see the module docstring / Stage 3 boundary).
+    # with one benign slack hull edge (Stage 4 fills it anyway - see
+    # crease_pattern), but one sub-hub incircle per side cannot match both flap
+    # length and Kawasaki: each side's two leaves' own natural hub points (fixed
+    # by that leaf's rho and edge directions alone) land ~0.2 apart - an order
+    # of magnitude past the ~0.11 target spine length, not a small residual - so
+    # the side needs an internal gusset the spine event does not emit, and the
+    # packing itself would need extra angle constraints to place the band where
+    # that gusset requires - an honest partial base (see the module docstring /
+    # Stage 4 boundary).
     "river-asym": river_tree(0.5, [1.2, 0.8], [1.0, 0.9], "river-asym"),
     # A multi-junction "caterpillar": leaves - hubA =spine= hubB =spine= hubC -
     # leaves (three hubs, two spines). The hull exposes more than two river edges,
@@ -501,6 +530,23 @@ def _river_split(Q: np.ndarray, offs: np.ndarray):
     ``None`` when there is no clean single-spine river (0 or >2 river edges, the
     two sub-hubs disagree, or the incentre fit is not tangent). A ``None`` keeps
     the caller on the ordinary gusset path, so stars are untouched.
+
+    River edges are told apart from a benign *slack* hull edge purely by
+    ``offs``, which is computed from the *tree* (positive only where a path
+    crosses an internal hub-to-hub edge) - never from how large the packed
+    geometric gap happens to be, so a floating/slack disc never gets mistaken
+    for a river band (Stage 4).
+
+    Stage 4 boundary (``river-asym``): ``hub(grpA)`` returning a low residual
+    means its 3 lines share *one* incircle, but that incircle's touch length on
+    a border edge need not equal that corner's ``rho`` unless the two corners'
+    own "natural" hub points (each fixed independently by that corner's own rho
+    and its two incident edge directions) already coincide - true for equal
+    flaps or the packing-forced mirror case, false in general. When they do not
+    coincide the caller still gets a low-residual ``(C0, R0)`` (it is a genuine
+    incentre of 3 lines - it just is not *this* side's flap-correct hub), so the
+    self-check downstream (Kawasaki + flap error in ``crease_pattern``) is what
+    catches it, not this function.
     """
     m = len(Q)
     river_edges = [k for k in range(m) if offs[k, (k + 1) % m] > 1e-9]
@@ -826,41 +872,6 @@ def reduced_dist(packing: Packing, i: int, j: int) -> float:
     return _reduced_dist(packing, i, j)
 
 
-def _hull_river_widths(packing: Packing, hidx: list[int]) -> list[float]:
-    """River band width left open on each convex-hull edge (0 == tangent pair).
-
-    ``W_k = scale*treepath(i, j) - (r_i + r_j)`` for hull edge ``k = (i, j)``.
-    A star's hull has ``W_k == 0`` everywhere; a single-spine river has exactly
-    two positive entries (the two sides of the band between the sub-hubs).
-    """
-    m = len(hidx)
-    out = []
-    for k in range(m):
-        i, j = hidx[k], hidx[(k + 1) % m]
-        r = packing.radii[i] + packing.radii[j]
-        out.append(_reduced_dist(packing, i, j) - r)
-    return out
-
-
-def _is_tight_hull(packing: Packing, hidx: list[int], tol: float = 1e-4) -> bool:
-    """True iff every hull edge is *reduced-tight* (``len == scale*treepath``).
-
-    Generalises the old tangent-disc test (``len == r_i + r_j``): a hull edge is
-    tight when its length equals the reduced tree-path distance between the two
-    leaves it joins. For a star every hull edge is a tangent disc pair, so this
-    is unchanged; for a (correctly packed) river the river edges are longer than
-    ``r_i + r_j`` yet still tight in this reduced sense.
-    """
-    pts = packing.centers
-    m = len(hidx)
-    for k in range(m):
-        i, j = hidx[k], hidx[(k + 1) % m]
-        edge = float(np.linalg.norm(pts[i] - pts[j]))
-        if abs(edge - _reduced_dist(packing, i, j)) > tol:
-            return False
-    return True
-
-
 def _universal_pattern(packing: Packing, hidx: list[int]) -> CreasePattern:
     """Fill the (tight, convex) active hull with the universal molecule."""
     pts = packing.centers
@@ -1040,33 +1051,34 @@ def _planarise(packing: Packing, creases: list) -> CreasePattern:
 def crease_pattern(packing: Packing) -> CreasePattern:
     """Build the crease pattern for a packed base.
 
-    Routing (all three share the one reduced-distance tight test):
+    Routing is a single honest rule, not a per-topology special case:
 
-    * **Star** - the hull is reduced-tight with *no* river edges: fill it with
-      the universal (gusset) molecule (triangle rabbit-ear / tangential-quad
-      incircle / pentagon+ gussets), which folds flat end to end.
-    * **Single-spine river** - the hull is reduced-tight with exactly two river
-      edges: build the two-node river molecule and, *only if it self-verifies*
-      flat-foldable with exact flap lengths, return it. This is what makes a body
-      with limbs fold, not just a star.
-    * **Otherwise** (river molecule fails its self-check, or the hull is not
-      reduced-tight) fall back to the per-Delaunay-triangle rabbit-ear assembly -
-      an honest *partial* base whose non-tangent diagonals are unresolved.
+    * Every disc must sit *on* the convex hull (no interior disc - that is a
+      genuinely different topology the molecule below does not address; see
+      the module docstring). If one does, fall back to the partial base.
+    * Otherwise fill the hull with the universal (gusset + river-spine)
+      molecule. It decides for itself, purely from the *actual packed
+      geometry* (``Q``, the real disc centres and radii), whether a hull edge
+      is an exact tangent border, a benign packing *slack* gap (a hull edge
+      whose optimum simply left room - the border-tangent feet just leave an
+      open paper gap there, no crease needed), or a genuine river band (a
+      tree-spine crossing, which the recursion turns into a spine-contraction
+      event). Slack and river bands look the same to the border-tangent
+      geometry; only the spine event needs to tell them apart, and it does so
+      from the *tree* (an edge both of whose endpoints are internal hub
+      nodes), not from the size of the gap - see ``_river_split``.
+    * The result is **always self-verified**: Kawasaki + Maekawa at every
+      interior vertex and < 2% flap error, on triangle/quad/pentagon stars
+      *and* every river shape alike. Only a pattern that actually passes is
+      returned; anything else - a river whose sub-hub fans need an internal
+      gusset the current recursion does not yet emit, or a multi-junction
+      whose interior is unresolved - falls back to the per-Delaunay-triangle
+      rabbit-ear assembly, an honest *partial* base.
     """
     pts = packing.centers
     hull = ConvexHull(pts)
     hidx = [int(i) for i in hull.vertices]     # CCW hull corners (row indices)
-    if len(hidx) == len(pts) and _is_tight_hull(packing, hidx):
-        widths = _hull_river_widths(packing, hidx)
-        n_river = sum(1 for w in widths if w > 1e-6)
-        if n_river == 0:
-            return _universal_pattern(packing, hidx)
-        # A river hull (two river edges for a single spine, more for a
-        # multi-junction path): route it through the same unified molecule, whose
-        # recursion fires a spine event at each river band. Keep the honest
-        # self-check - a river the molecule cannot close flat (an asymmetric fan,
-        # or a junction the spine events do not resolve) falls back to the partial
-        # base rather than faking a flat fold.
+    if len(hidx) == len(pts):
         from foldforge.geometry.foldability import foldability_report
         pattern = _universal_pattern(packing, hidx)
         report = foldability_report(pattern)
@@ -1181,7 +1193,7 @@ def flap_length_errors(packing: Packing, pattern: CreasePattern) -> np.ndarray:
     pts = packing.centers
     hull = ConvexHull(pts)
     hidx = [int(i) for i in hull.vertices]
-    if len(hidx) == len(pts) and _is_tight_hull(packing, hidx):
+    if len(hidx) == len(pts):
         # Universal molecule: each border edge is cut at its disc tangent point,
         # so a leaf's flap length is the shorter of its two incident border (B)
         # crease halves - read directly off the built pattern.
