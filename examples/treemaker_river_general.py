@@ -3,9 +3,9 @@
 Runs every built-in river base end to end and draws, for each, its circle
 packing (river bands shaded), its crease pattern (mountain/valley/border, spine
 creases thickened, sub-hub nodes ringed) and an honest Kawasaki / Maekawa / flap
-verdict. Three of the four fold flat end to end (symmetric, mirror-symmetric and
-fully asymmetric single spines - the last thanks to the angle-aware packing);
-the multi-junction river is an honest partial, and the panel says so.
+verdict. All four fold flat end to end (symmetric, mirror-symmetric and fully
+asymmetric single spines, plus the linear 3-hub caterpillar - thanks to the
+angle-aware packing; the caterpillar carries ~1% flap error on its far flaps).
 
     python examples/treemaker_river_general.py
 

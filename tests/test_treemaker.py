@@ -171,19 +171,27 @@ def test_mirror_asymmetric_single_spine_river_folds_flat():
     assert len(pattern.faces) > 0
 
 
-def test_multijunction_river_is_honestly_partial():
-    """Stage 3 boundary: a multi-junction (>=3 hub) river does NOT fully fold.
+def test_caterpillar_multijunction_river_folds_flat():
+    """Stage 6: the linear 2/1/2 caterpillar (3 hubs, 2 spines) folds flat.
 
-    The 'caterpillar' has two spines, so the packed hull exposes more than two
-    river edges; the single-band spine event resolves one band but not the
-    interior junction, so the self-check fails and it falls back to the partial
-    base. Pins the honest ceiling so a faked flat fold would fail loudly.
+    The packing holds the pentagon's five sides tight with one angle equality per
+    end hub; the middle hub (incentre of its two river lines + the opposite one)
+    then needs no gusset. Spine lengths are ~3.4% long, so the four spine-crossing
+    flaps carry ~1.1% error (under the 2% gate); the middle flap is exact.
     """
     packing, pattern = design_base(get_tree("river-caterpillar"))
     report = foldability_report(pattern)
-    passes = all(v.kawasaki and v.maekawa for v in report.vertices)
-    assert not passes, "multi-junction river unexpectedly folds flat - update claims"
-    assert len(report.vertices) > 0                 # it still builds a real pattern
+    assert len(report.vertices) == 3                # the three hub nodes
+    for v in report.vertices:
+        assert v.kawasaki is True, f"vertex {v.vertex} fails Kawasaki"
+        assert v.maekawa is True, f"vertex {v.vertex} fails Maekawa"
+    err = flap_length_errors(packing, pattern)
+    # Approximate, NOT exact: pin the ~1.1% spine-crossing residual as a band so
+    # it can never silently drift toward the gate or be mistaken for a machine-
+    # zero fold like the stars / single-spine rivers. Exact flaps need the full
+    # Lang universal molecule (the 2-DOF pentagon is out of freedom).
+    assert 0.010 < err.max() < 0.013, f"river-caterpillar flap error {err.max():.4f}"
+    assert err[2] < 1e-6                            # the middle-hub leaf is exact
 
 
 @pytest.mark.parametrize("name", ["three-flap", "four-flap", "five-flap"])

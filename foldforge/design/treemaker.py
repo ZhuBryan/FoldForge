@@ -75,11 +75,15 @@ Honest scope (see ``crease_pattern`` and the tests):
       holds the four hull sides tight and adds one angle equality,
       ``rho_A0 tan(th_A0/2) = rho_A1 tan(th_A1/2)``, so each hub's two natural hub
       points coincide; the other hub's condition then holds automatically.)
-      Still partial:
-        - a *multi-junction* (>=3 hub) river (``river-caterpillar``) - its packed
-          hull exposes more than two river edges, so the single-band spine event
-          resolves one band but not the interior junction (a Y-junction / nested
-          spine event is not implemented).
+      Stage 6: the linear 2/1/2 caterpillar (``river-caterpillar``) folds flat
+      too. ``pack_tree`` holds its pentagon's five sides tight and adds one angle
+      equality per 2-leaf end hub; the middle hub (incentre of its two river lines
+      and the opposite one) then lands exactly on its leaf's natural hub point, so
+      the "middle-hub gusset" has length zero and no gusset crease is needed. The
+      one thing a single incentre per hub cannot also pin is the spine length: the
+      geometric spines come out ~3.4% long, i.e. ~1.1% flap error on the four
+      spine-crossing flaps (within the 2% gate; exact would need the full Lang
+      molecule). Other multi-junction shapes stay partial.
 
     from foldforge.design.treemaker import get_tree, design_base
     packing, pattern = design_base(get_tree("four-flap"))
@@ -179,7 +183,8 @@ def river_tree(spine: float, left: list[float], right: list[float],
     side of the spine is one clean tangent fan whose incircle touch lengths equal
     its flap radii. For a 2+2 single spine ``pack_tree`` places the four discs so
     this holds even for fully asymmetric flaps and sides (Stage 4b). A
-    multi-junction river packs cleanly but falls back to the honest partial base.
+    linear 2/1/2 caterpillar also folds flat (~1% flap error); other multi-junction
+    rivers pack cleanly but fall back to the honest partial base.
     """
     edges = [(0, 1, spine)]
     nid = 2
@@ -214,9 +219,8 @@ BUILTIN_TREES = {
     # (Stage 4b), so it folds flat end to end.
     "river-asym": river_tree(0.5, [1.2, 0.8], [1.0, 0.9], "river-asym"),
     # A multi-junction "caterpillar": leaves - hubA =spine= hubB =spine= hubC -
-    # leaves (three hubs, two spines). The hull exposes more than two river edges,
-    # so the single-band spine event does not resolve the interior junction; it
-    # packs cleanly but folds only partially (Stage 3 honest boundary).
+    # leaves (three hubs, two spines). Folds flat (Stage 6): angle-aware pentagon
+    # packing + a three-river chain event; far flaps carry ~1.1% spine-length error.
     "river-caterpillar": MetricTree(
         edges=[(0, 1, 0.5), (1, 2, 0.5),
                (0, 3, 1.0), (0, 4, 1.0), (1, 5, 0.8), (2, 6, 1.0), (2, 7, 1.0)],
@@ -257,7 +261,8 @@ class Packing:
 
 def _adjacent_in_ring(ring, i, j) -> bool:
     k = ring.index(i) if i in ring else None
-    return k is not None and j in (ring[(k - 1) % 4], ring[(k + 1) % 4])
+    n = len(ring)
+    return k is not None and j in (ring[(k - 1) % n], ring[(k + 1) % n])
 
 
 def _single_spine_rings(tree: MetricTree, leaves: list[int]):
@@ -285,10 +290,35 @@ def _single_spine_rings(tree: MetricTree, leaves: list[int]):
     return [(A[0], A[1], B[0], B[1]), (A[0], A[1], B[1], B[0])]
 
 
+def _caterpillar_rings(tree: MetricTree, leaves: list[int]):
+    """Cyclic hull orders for the 2/1/2 linear caterpillar (hubA=hubB=hubC).
+
+    The middle hub (one leaf, two spines) sits between the two 2-leaf end hubs, so
+    the packed pentagon's ring is ``(A0, A1, M, C0, C1)``. Returns its four
+    within-pair orderings, or ``None`` for any other tree.
+    """
+    hubs = {tree.parent_hub(l) for l in leaves}
+    if len(hubs) != 3 or len(leaves) != 5 or len(tree.nodes) != 8:
+        return None
+    grp = {h: [i for i, l in enumerate(leaves) if tree.parent_hub(l) == h] for h in hubs}
+    mid = [h for h, g in grp.items() if len(g) == 1 and len(tree._adj[h]) == 3]
+    ends = [g for h, g in grp.items() if len(g) == 2]
+    if len(mid) != 1 or len(ends) != 2:
+        return None
+    (M,), (A, C) = grp[mid[0]], ends
+    return [(A[a], A[1 - a], M, C[c], C[1 - c]) for a in (0, 1) for c in (0, 1)]
+
+
+def _ring_pairs(ring):
+    """Ring corner pairs sharing one hub (each needs one angle equality)."""
+    return [(0, 1)] if len(ring) == 4 else [(0, 1), (3, 4)]
+
+
 def _ring_consistent(c, ring, rho, d, sc, tol=1e-6) -> bool:
-    """The four ring sides are tight at the solved scale."""
-    for k in range(4):
-        i, j = ring[k], ring[(k + 1) % 4]
+    """Every ring side is tight at the solved scale."""
+    n = len(ring)
+    for k in range(n):
+        i, j = ring[k], ring[(k + 1) % n]
         if abs(np.linalg.norm(c[i] - c[j]) - sc * d[i, j]) > tol:
             return False
     return True
@@ -345,8 +375,9 @@ def pack_tree(tree: MetricTree) -> Packing:
                 cons.append({"type": "ineq",
                              "fun": lambda z, i=i, a=axis: 1.0 - unpack(z)[0][i, a] - z[-1] * rho[i]})
         if ring is not None:
-            for k in range(4):
-                i, j = ring[k], ring[(k + 1) % 4]
+            nr = len(ring)
+            for k in range(nr):
+                i, j = ring[k], ring[(k + 1) % nr]
                 cons.append({
                     "type": "eq",
                     "fun": (lambda z, i=i, j=j: (
@@ -355,14 +386,15 @@ def pack_tree(tree: MetricTree) -> Packing:
                 })
 
             def half_tan(c, k):                    # tan(theta_k / 2) at ring corner k
-                a, b, e = c[ring[(k - 1) % 4]], c[ring[k]], c[ring[(k + 1) % 4]]
+                a, b, e = c[ring[(k - 1) % nr]], c[ring[k]], c[ring[(k + 1) % nr]]
                 u, v = a - b, e - b
                 cs = u.dot(v) / (np.linalg.norm(u) * np.linalg.norm(v))
                 return math.sqrt(max((1 - cs) / (1 + cs), 0.0))
 
-            cons.append({"type": "eq", "fun": lambda z: (
-                rho[ring[0]] * half_tan(unpack(z)[0], 0)
-                - rho[ring[1]] * half_tan(unpack(z)[0], 1))})
+            for ka, kb in _ring_pairs(ring):
+                cons.append({"type": "eq", "fun": lambda z, ka=ka, kb=kb: (
+                    rho[ring[ka]] * half_tan(unpack(z)[0], ka)
+                    - rho[ring[kb]] * half_tan(unpack(z)[0], kb))})
 
         bounds = [(0.0, 1.0)] * (2 * n) + [(1e-4, 2.0)]
         with warnings.catch_warnings():
@@ -372,7 +404,7 @@ def pack_tree(tree: MetricTree) -> Packing:
             return minimize(lambda z: -z[-1], z0, method="SLSQP", bounds=bounds,
                             constraints=cons, options={"maxiter": 400, "ftol": 1e-9})
 
-    rings = _single_spine_rings(tree, leaves)
+    rings = _single_spine_rings(tree, leaves) or _caterpillar_rings(tree, leaves)
     if rings is None:
         res = solve(None)
     else:
@@ -647,6 +679,53 @@ def _river_split(Q: np.ndarray, offs: np.ndarray):
     return 0.5 * (R0 + R1), e0, e1, grpA, grpB, C0, C1
 
 
+def _river_chain(Q: np.ndarray, offs: np.ndarray):
+    """Linear caterpillar event: three river edges bounding three hub groups.
+
+    Each river line is a hull edge held open by a tree spine. The three arcs of
+    vertices between consecutive river edges are the hubs' leaf groups; exactly one
+    is a lone corner (the middle hub, two spines + one leaf). An end hub is the
+    incentre of its two bounding river lines plus its own tight border; the middle
+    hub, which has only its two bounding river lines, takes the *opposite* river
+    line as its third, so every hub is a clean bisector/perpendicular fan
+    (Kawasaki). Returns ``(groups, hubs, e_opp)`` with ``groups``/``hubs`` in chain
+    order (end, middle, end) and ``e_opp`` the river edge opposite the middle, or
+    ``None`` (every hub must be one tangent fan; the packing's angle equalities make
+    that true, the self-check in ``crease_pattern`` stays authoritative).
+    """
+    m = len(Q)
+    rv = [k for k in range(m) if offs[k, (k + 1) % m] > 1e-9]
+    if len(rv) != 3:
+        return None
+    arcs = []
+    for a in range(3):
+        e, f = rv[a], rv[(a + 1) % 3]
+        out, k = [], (e + 1) % m
+        while True:
+            out.append(k)
+            if k == f:
+                break
+            k = (k + 1) % m
+        arcs.append((out, e, f))                     # vertices, prev river edge, next
+    lone = [a for a in range(3) if len(arcs[a][0]) == 1]
+    if len(lone) != 1:
+        return None
+    a = lone[0]
+    order = [arcs[(a + 1) % 3], arcs[a], arcs[(a + 2) % 3]]   # end, middle, end
+    e_opp = order[0][2]                              # river edge between the two ends
+    cen = Q.mean(axis=0)
+    hubs = []
+    for gi, (grp, e, f) in enumerate(order):
+        edges = [e, f] + ([e_opp] if gi == 1 else [])
+        edges += [k for k in grp if offs[k, (k + 1) % m] <= 1e-9 and (k + 1) % m in grp]
+        C, _, res = _incenter_of_lines(
+            [_line_normal(Q[k], Q[(k + 1) % m]) for k in edges], cen)
+        if res > 1e-6:
+            return None
+        hubs.append(C)
+    return [g[0] for g in order], hubs, e_opp
+
+
 def _um_fill(Q, rho, outer, creases, leaf_ids, packing, river_info=None):
     """Recursively emit the universal-molecule creases of one active polygon.
 
@@ -734,6 +813,35 @@ def _um_fill(Q, rho, outer, creases, leaf_ids, packing, river_info=None):
                    if packing.tree.parent_hub(packing.leaves[int(leaf_ids[k])])
                    != packing.tree.root]
             river_info.append((sl, far))
+        return
+
+    chain = _river_chain(Q, offs) if river is None else None
+    if chain is not None:
+        groups, hubs, e_opp = chain
+        hub_of = {v: hubs[g] for g, grp in enumerate(groups) for v in grp}
+        for v, Cv in hub_of.items():
+            creases.append((Q[v], Cv, "ridge"))     # leaf ridge to its hub
+        creases.append((hubs[0], hubs[1], "ridge"))   # the two spine creases
+        creases.append((hubs[1], hubs[2], "ridge"))
+        # middle hub: its third perpendicular, down to the opposite river line
+        creases.append((hubs[1], _foot(hubs[1], Q[e_opp], Q[(e_opp + 1) % m]), "hinge"))
+        for k in range(m):
+            i, j = k, (k + 1) % m
+            u = Q[j] - Q[i]
+            u = u / np.linalg.norm(u)
+            creases.append((hub_of[i], Q[i] + rho[i] * u, "hinge"))
+            creases.append((hub_of[j], Q[j] - rho[j] * u, "hinge"))
+            creases.append((Q[i], Q[j], "edge"))
+        if river_info is not None:
+            tree = packing.tree
+            hub_ids = [tree.parent_hub(packing.leaves[int(leaf_ids[g[0]])]) for g in groups]
+            ri = hub_ids.index(tree.root)
+            for gi, grp in enumerate(groups):
+                for sp in (0, 1):                    # spine sp joins chain hubs sp, sp+1
+                    if min(gi, ri) <= sp < max(gi, ri):
+                        far = [int(leaf_ids[v]) for v in grp]
+                        river_info.append(
+                            (float(np.linalg.norm(hubs[sp] - hubs[sp + 1])), far))
         return
 
     if event is None:                               # degenerate guard: fill as incircle
