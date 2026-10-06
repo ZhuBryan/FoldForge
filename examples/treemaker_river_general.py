@@ -3,14 +3,9 @@
 Runs every built-in river base end to end and draws, for each, its circle
 packing (river bands shaded), its crease pattern (mountain/valley/border, spine
 creases thickened, sub-hub nodes ringed) and an honest Kawasaki / Maekawa / flap
-verdict. Two of the four fold flat end to end (the symmetric and the
-mirror-symmetric single spine); the fully asymmetric and the multi-junction
-rivers are honest partials, and the panel says so per tree. Stage 4 removed the
-separate "is the hull reduced-tight" pre-check (``river-asym`` packs with one
-benign slack edge, not just river bands) so every disc-on-hull packing now gets
-a genuine attempt at the universal molecule before falling back - it still
-falls back for ``river-asym``, precisely diagnosed as needing an internal
-gusset *and* a packing change (see the module docstring), not faked.
+verdict. Three of the four fold flat end to end (symmetric, mirror-symmetric and
+fully asymmetric single spines - the last thanks to the angle-aware packing);
+the multi-junction river is an honest partial, and the panel says so.
 
     python examples/treemaker_river_general.py
 

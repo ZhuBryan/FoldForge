@@ -70,26 +70,12 @@ Honest scope (see ``crease_pattern`` and the tests):
       are both internal hub nodes) - not the size of the gap - decides whether
       an edge is a spine that fires the sub-hub/spine-crease event. It is still
       built behind the honest self-check, so the harder topologies fall back to
-      the partial rabbit-ear base rather than fake a fold:
-        - a *fully* asymmetric single spine (unequal flaps AND unequal sides,
-          ``river-asym``) - diagnosed precisely (Stage 4): the two leaves at
-          each end of a river band each have their *own* natural hub point (the
-          intersection of the two perpendiculars raised at their rho-cut
-          border-tangent feet), fixed purely by that leaf's own rho and its two
-          incident edge directions. A single sub-hub can only work when a side's
-          leaves' natural hub points coincide (equal flaps, or the mirror case,
-          where the packing's own symmetry forces that); the fully-asymmetric
-          packing has no such symmetry, so ``river-asym``'s four natural hub
-          points are all different (by ~0.19-0.24, an order of magnitude past
-          the ~0.11 target spine length - not a small numerical residual). One
-          sub-hub incircle per side (the current construction) then satisfies
-          neither Kawasaki nor the true spine length at *either* hub. Reconciling
-          this needs the two mismatched natural points on a side joined by their
-          own internal gusset *and* the packing itself to place the river band
-          at the angle that gusset implies (today's ``pack_tree`` only enforces
-          pairwise distances, never the angle a straight single-crease spine
-          needs) - a change to the packing's optimisation, not just the molecule,
-          and out of this stage's bounded scope;
+      the partial rabbit-ear base rather than fake a fold. (Stage 4b: a fully
+      asymmetric 2+2 single spine, ``river-asym``, now folds flat - ``pack_tree``
+      holds the four hull sides tight and adds one angle equality,
+      ``rho_A0 tan(th_A0/2) = rho_A1 tan(th_A1/2)``, so each hub's two natural hub
+      points coincide; the other hub's condition then holds automatically.)
+      Still partial:
         - a *multi-junction* (>=3 hub) river (``river-caterpillar``) - its packed
           hull exposes more than two river edges, so the single-band spine event
           resolves one band but not the interior junction (a Y-junction / nested
@@ -189,12 +175,9 @@ def river_tree(spine: float, left: list[float], right: list[float],
     separated by the spine, which the packing honours by leaving an open river
     band between them. A single-spine river folds flat end to end whenever each
     side of the spine is one clean tangent fan whose incircle touch lengths equal
-    its flap radii - equal flaps, or unequal-but-mirror-symmetric flaps. A *fully*
-    asymmetric single spine (unequal flaps and unequal sides) or a multi-junction
-    river packs cleanly but falls back to the honest partial base, because a side
-    would then need an internal gusset the single spine event does not emit *and*
-    the packing itself would need to place the river band at the angle that
-    gusset implies (see the module docstring / Stage 4 boundary).
+    its flap radii. For a 2+2 single spine ``pack_tree`` places the four discs so
+    this holds even for fully asymmetric flaps and sides (Stage 4b). A
+    multi-junction river packs cleanly but falls back to the honest partial base.
     """
     edges = [(0, 1, spine)]
     nid = 2
@@ -224,16 +207,9 @@ BUILTIN_TREES = {
     # tangent fan whose incircle touch lengths equal the flap radii, so the spine
     # event closes it flat end to end - the asymmetric-flap river that folds.
     "river-mirror": river_tree(0.5, [1.1, 0.9], [0.9, 1.1], "river-mirror"),
-    # A *fully* asymmetric single spine (unequal flaps AND unequal sides). Packs
-    # with one benign slack hull edge (Stage 4 fills it anyway - see
-    # crease_pattern), but one sub-hub incircle per side cannot match both flap
-    # length and Kawasaki: each side's two leaves' own natural hub points (fixed
-    # by that leaf's rho and edge directions alone) land ~0.2 apart - an order
-    # of magnitude past the ~0.11 target spine length, not a small residual - so
-    # the side needs an internal gusset the spine event does not emit, and the
-    # packing itself would need extra angle constraints to place the band where
-    # that gusset requires - an honest partial base (see the module docstring /
-    # Stage 4 boundary).
+    # A *fully* asymmetric single spine (unequal flaps AND unequal sides). The
+    # packing adds the angle condition that makes one incentre per hub flap-correct
+    # (Stage 4b), so it folds flat end to end.
     "river-asym": river_tree(0.5, [1.2, 0.8], [1.0, 0.9], "river-asym"),
     # A multi-junction "caterpillar": leaves - hubA =spine= hubB =spine= hubC -
     # leaves (three hubs, two spines). The hull exposes more than two river edges,
@@ -277,6 +253,45 @@ class Packing:
         return np.array([self.scale * self.tree.flap_length(l) for l in self.leaves])
 
 
+def _adjacent_in_ring(ring, i, j) -> bool:
+    k = ring.index(i) if i in ring else None
+    return k is not None and j in (ring[(k - 1) % 4], ring[(k + 1) % 4])
+
+
+def _single_spine_rings(tree: MetricTree, leaves: list[int]):
+    """Cyclic hull orders for a single-spine river with two flaps per hub.
+
+    Returns the two candidate rings ``(A0, A1, B0, B1)`` / ``(A0, A1, B1, B0)`` of
+    disc rows (A0, A1 on one hub, B0, B1 on the other), or ``None`` for any other
+    tree (stars and other rivers keep the plain packing).
+
+    For such a quad with all four sides tight the two hubs' "natural hub points"
+    (the perpendiculars at each leaf's rho-cut feet) coincide for both hubs as soon
+    as they do for one - the two angle conditions are not independent - so a single
+    scalar constraint ``rho_A0 tan(th_A0/2) == rho_A1 tan(th_A1/2)`` on top of the
+    four tight sides makes one incentre per hub serve both its flaps and puts both
+    hubs on the common bisector (spine) line.
+    """
+    hubs = {tree.parent_hub(l) for l in leaves}
+    if len(hubs) != 2 or len(tree.nodes) != len(leaves) + 2 or len(leaves) != 4:
+        return None
+    ha, hb = sorted(hubs)
+    A = [i for i, l in enumerate(leaves) if tree.parent_hub(l) == ha]
+    B = [i for i, l in enumerate(leaves) if tree.parent_hub(l) == hb]
+    if len(A) != 2 or len(B) != 2:
+        return None
+    return [(A[0], A[1], B[0], B[1]), (A[0], A[1], B[1], B[0])]
+
+
+def _ring_consistent(c, ring, rho, d, sc, tol=1e-6) -> bool:
+    """The four ring sides are tight at the solved scale."""
+    for k in range(4):
+        i, j = ring[k], ring[(k + 1) % 4]
+        if abs(np.linalg.norm(c[i] - c[j]) - sc * d[i, j]) > tol:
+            return False
+    return True
+
+
 def pack_tree(tree: MetricTree) -> Packing:
     """Pack one disc per leaf into the unit square, maximising the scale.
 
@@ -305,26 +320,64 @@ def pack_tree(tree: MetricTree) -> Packing:
     def unpack(z):
         return z[:-1].reshape(n, 2), z[-1]
 
-    cons = []
-    for i in range(n):
-        for j in range(i + 1, n):
-            cons.append({
-                "type": "ineq",
-                "fun": (lambda z, i=i, j=j: (
-                    (c := unpack(z)[0])[i] - c[j]).dot(c[i] - c[j])
-                    - (z[-1] * d[i, j]) ** 2),
-            })
-    for i in range(n):
-        # disc must sit inside [0,1]^2: centre at least (scale*rho_i) from walls.
-        for axis in (0, 1):
-            cons.append({"type": "ineq",
-                         "fun": lambda z, i=i, a=axis: unpack(z)[0][i, a] - z[-1] * rho[i]})
-            cons.append({"type": "ineq",
-                         "fun": lambda z, i=i, a=axis: 1.0 - unpack(z)[0][i, a] - z[-1] * rho[i]})
+    def solve(ring):
+        """SLSQP pack; ``ring`` (4 disc rows, cyclic) adds the single-spine
+        constraints: its four hull sides tight and the angle condition that lets
+        one incentre per hub serve both its flaps (see ``_single_spine_rings``)."""
+        cons = []
+        for i in range(n):
+            for j in range(i + 1, n):
+                if ring is not None and _adjacent_in_ring(ring, i, j):
+                    continue                                   # added as equalities below
+                cons.append({
+                    "type": "ineq",
+                    "fun": (lambda z, i=i, j=j: (
+                        (c := unpack(z)[0])[i] - c[j]).dot(c[i] - c[j])
+                        - (z[-1] * d[i, j]) ** 2),
+                })
+        for i in range(n):
+            # disc must sit inside [0,1]^2: centre at least (scale*rho_i) from walls.
+            for axis in (0, 1):
+                cons.append({"type": "ineq",
+                             "fun": lambda z, i=i, a=axis: unpack(z)[0][i, a] - z[-1] * rho[i]})
+                cons.append({"type": "ineq",
+                             "fun": lambda z, i=i, a=axis: 1.0 - unpack(z)[0][i, a] - z[-1] * rho[i]})
+        if ring is not None:
+            for k in range(4):
+                i, j = ring[k], ring[(k + 1) % 4]
+                cons.append({
+                    "type": "eq",
+                    "fun": (lambda z, i=i, j=j: (
+                        (c := unpack(z)[0])[i] - c[j]).dot(c[i] - c[j])
+                        - (z[-1] * d[i, j]) ** 2),
+                })
 
-    bounds = [(0.0, 1.0)] * (2 * n) + [(1e-4, 2.0)]
-    res = minimize(lambda z: -z[-1], z0, method="SLSQP", bounds=bounds,
-                   constraints=cons, options={"maxiter": 400, "ftol": 1e-9})
+            def half_tan(c, k):                    # tan(theta_k / 2) at ring corner k
+                a, b, e = c[ring[(k - 1) % 4]], c[ring[k]], c[ring[(k + 1) % 4]]
+                u, v = a - b, e - b
+                cs = u.dot(v) / (np.linalg.norm(u) * np.linalg.norm(v))
+                return math.sqrt(max((1 - cs) / (1 + cs), 0.0))
+
+            cons.append({"type": "eq", "fun": lambda z: (
+                rho[ring[0]] * half_tan(unpack(z)[0], 0)
+                - rho[ring[1]] * half_tan(unpack(z)[0], 1))})
+
+        bounds = [(0.0, 1.0)] * (2 * n) + [(1e-4, 2.0)]
+        return minimize(lambda z: -z[-1], z0, method="SLSQP", bounds=bounds,
+                        constraints=cons, options={"maxiter": 400, "ftol": 1e-9})
+
+    rings = _single_spine_rings(tree, leaves)
+    if rings is None:
+        res = solve(None)
+    else:
+        best = None
+        for ring in rings:
+            r = solve(ring)
+            c, sc = unpack(r.x)
+            ok = r.success and _ring_consistent(c, ring, rho, d, sc)
+            if ok and (best is None or sc > unpack(best.x)[1]):
+                best = r
+        res = best if best is not None else solve(None)
 
     centers, scale = unpack(res.x)
     radii = scale * rho

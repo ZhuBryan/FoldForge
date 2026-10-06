@@ -206,27 +206,17 @@ def test_reduced_dist_equals_radii_sum_on_star_hull(name):
         assert rd == pytest.approx(packing.radii[i] + packing.radii[j], abs=1e-9)
 
 
-def test_asymmetric_river_is_honestly_partial():
-    """Honest ceiling: a fully-asymmetric single spine does NOT fully fold yet.
+def test_asymmetric_river_folds_flat():
+    """A fully-asymmetric single spine folds flat once the packing is angle-aware.
 
-    Stage 4 diagnosed this precisely: each leaf has its own "natural" hub point
-    (fixed purely by its own rho and its two incident edge directions - the
-    intersection of the perpendiculars raised at its rho-cut border feet). A
-    single sub-hub per side only works when a side's leaves' natural points
-    coincide (equal flaps, or the packing-forced mirror-symmetric case);
-    river-asym's four natural points are all ~0.2 apart, an order of magnitude
-    past the ~0.11 target spine length, so no single incircle can serve as that
-    side's hub. Closing this needs both an internal gusset AND a packing that
-    places the river band at the angle that gusset implies (``pack_tree`` only
-    enforces pairwise distances today) - beyond the molecule alone, so the
-    self-check fails and it falls back to the partial base. This pins that
-    boundary so a regression that silently 'fixed' or faked it would fail
-    loudly.
+    ``pack_tree`` now holds the four hull sides tight and imposes
+    ``rho_A0 tan(th_A0/2) == rho_A1 tan(th_A1/2)`` on the 2+2 single-spine quad,
+    so each hub's leaves share one natural hub point (the two angle conditions
+    are not independent) and the existing spine event closes the base flat.
     """
-    from foldforge.design.treemaker import river_tree, design_base
-    tree = river_tree(0.5, [1.2, 0.8], [1.0, 0.9], "river-asym")
-    packing, pattern = design_base(tree)
+    packing, pattern = design_base(get_tree("river-asym"))
     report = foldability_report(pattern)
-    passes = all(v.kawasaki and v.maekawa for v in report.vertices)
-    assert not passes, "asymmetric river unexpectedly folds flat - update claims"
-    assert len(report.vertices) > 0                 # it still builds a real pattern
+    assert len(report.vertices) > 0
+    assert all(v.kawasaki and v.maekawa for v in report.vertices)
+    err = flap_length_errors(packing, pattern)
+    assert err.max() < 0.02, f"river-asym flap error {err.max():.4f}"
