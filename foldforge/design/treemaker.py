@@ -92,6 +92,8 @@ import random
 from dataclasses import dataclass, field
 
 import numpy as np
+import warnings
+
 from scipy.optimize import minimize
 from scipy.spatial import ConvexHull, Delaunay
 
@@ -363,8 +365,12 @@ def pack_tree(tree: MetricTree) -> Packing:
                 - rho[ring[1]] * half_tan(unpack(z)[0], 1))})
 
         bounds = [(0.0, 1.0)] * (2 * n) + [(1e-4, 2.0)]
-        return minimize(lambda z: -z[-1], z0, method="SLSQP", bounds=bounds,
-                        constraints=cons, options={"maxiter": 400, "ftol": 1e-9})
+        with warnings.catch_warnings():
+            # SLSQP probes just outside bounds during line search and clips;
+            # the solve still converges to a feasible solution. Cosmetic noise.
+            warnings.simplefilter("ignore", RuntimeWarning)
+            return minimize(lambda z: -z[-1], z0, method="SLSQP", bounds=bounds,
+                            constraints=cons, options={"maxiter": 400, "ftol": 1e-9})
 
     rings = _single_spine_rings(tree, leaves)
     if rings is None:
