@@ -80,10 +80,11 @@ Honest scope (see ``crease_pattern`` and the tests):
       equality per 2-leaf end hub; the middle hub (incentre of its two river lines
       and the opposite one) then lands exactly on its leaf's natural hub point, so
       the "middle-hub gusset" has length zero and no gusset crease is needed. The
-      one thing a single incentre per hub cannot also pin is the spine length: the
-      geometric spines come out ~3.4% long, i.e. ~1.1% flap error on the four
-      spine-crossing flaps (within the 2% gate; exact would need the full Lang
-      molecule). Other multi-junction shapes stay partial.
+      base is geometrically exact: flap lengths are read off the flat-folded
+      image (a spine crease is tilted off the fold axis, so summing straight
+      crease lengths would over-count it; the older metric did, and showed a
+      spurious ~1.1% error on the four spine-crossing flaps). Other
+      multi-junction shapes stay partial.
 
     from foldforge.design.treemaker import get_tree, design_base
     packing, pattern = design_base(get_tree("four-flap"))
@@ -183,7 +184,7 @@ def river_tree(spine: float, left: list[float], right: list[float],
     side of the spine is one clean tangent fan whose incircle touch lengths equal
     its flap radii. For a 2+2 single spine ``pack_tree`` places the four discs so
     this holds even for fully asymmetric flaps and sides (Stage 4b). A
-    linear 2/1/2 caterpillar also folds flat (~1% flap error); other multi-junction
+    linear 2/1/2 caterpillar also folds flat, exactly (flap lengths read off the folded image); other multi-junction
     rivers pack cleanly but fall back to the honest partial base.
     """
     edges = [(0, 1, spine)]
@@ -220,7 +221,7 @@ BUILTIN_TREES = {
     "river-asym": river_tree(0.5, [1.2, 0.8], [1.0, 0.9], "river-asym"),
     # A multi-junction "caterpillar": leaves - hubA =spine= hubB =spine= hubC -
     # leaves (three hubs, two spines). Folds flat (Stage 6): angle-aware pentagon
-    # packing + a three-river chain event; far flaps carry ~1.1% spine-length error.
+    # packing + a three-river chain event; exact (folded-image flap lengths).
     "river-caterpillar": MetricTree(
         edges=[(0, 1, 0.5), (1, 2, 0.5),
                (0, 3, 1.0), (0, 4, 1.0), (1, 5, 0.8), (2, 6, 1.0), (2, 7, 1.0)],
@@ -1112,21 +1113,16 @@ def _universal_pattern(packing: Packing, hidx: list[int]) -> CreasePattern:
     faces = _extract_faces(verts, edges)
     metadata = {"name": f"treemaker:{packing.tree.name}"}
     if river_info:
-        # Honest geometric flap lengths for a river base: each leaf's border cut
-        # plus every spine it crosses to reach the root. Read straight off the
-        # built geometry (spine == |C0 - C1|), so this verifies the fold, it does
-        # not assume it. Stars emit no river_info and keep the recompute path.
+        # Flap lengths for a river base are read off the FLAT-FOLDED image (the
+        # same authoritative measure lang_molecule uses), not by summing straight
+        # crease lengths: a spine crease is tilted off the fold axis, so its
+        # straight length is a hypotenuse, longer than the tree edge it carries.
+        # Stars emit no river_info and keep the recompute path.
+        from foldforge.design.lang_molecule import flat_fold_image, folded_tree_lengths
         pat0 = CreasePattern(vertices=verts, edges=edges, assignment=list(assign),
                              faces=faces, metadata={})
-        flap = np.full(len(packing.leaves), np.nan)
-        for gi in range(len(packing.leaves)):
-            b = [e for e in pat0.incident_edges(gi) if pat0.assignment[e] == "B"]
-            if not b:
-                continue
-            base = min(float(np.linalg.norm(verts[edges[e][0]] - verts[edges[e][1]]))
-                       for e in b)
-            flap[gi] = base + sum(sl for sl, far in river_info if gi in far)
-        metadata["flap_lengths"] = flap
+        img, _closure, _conn = flat_fold_image(pat0)
+        metadata["flap_lengths"] = folded_tree_lengths(packing, pat0, img)[0]
     return CreasePattern(
         vertices=verts,
         edges=edges,

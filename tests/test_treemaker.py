@@ -176,8 +176,9 @@ def test_caterpillar_multijunction_river_folds_flat():
 
     The packing holds the pentagon's five sides tight with one angle equality per
     end hub; the middle hub (incentre of its two river lines + the opposite one)
-    then needs no gusset. Spine lengths are ~3.4% long, so the four spine-crossing
-    flaps carry ~1.1% error (under the 2% gate); the middle flap is exact.
+    then needs no gusset. Flap lengths are measured on the flat-folded image, so
+    the tilted spine creases are counted by their axial length and every flap is
+    exact.
     """
     packing, pattern = design_base(get_tree("river-caterpillar"))
     report = foldability_report(pattern)
@@ -186,12 +187,7 @@ def test_caterpillar_multijunction_river_folds_flat():
         assert v.kawasaki is True, f"vertex {v.vertex} fails Kawasaki"
         assert v.maekawa is True, f"vertex {v.vertex} fails Maekawa"
     err = flap_length_errors(packing, pattern)
-    # Approximate, NOT exact: pin the ~1.1% spine-crossing residual as a band so
-    # it can never silently drift toward the gate or be mistaken for a machine-
-    # zero fold like the stars / single-spine rivers. Exact flaps need the full
-    # Lang universal molecule (the 2-DOF pentagon is out of freedom).
-    assert 0.010 < err.max() < 0.013, f"river-caterpillar flap error {err.max():.4f}"
-    assert err[2] < 1e-6                            # the middle-hub leaf is exact
+    assert err.max() < 1e-6, f"river-caterpillar flap error {err.max():.2e}"
 
 
 @pytest.mark.parametrize("name", ["three-flap", "four-flap", "five-flap"])

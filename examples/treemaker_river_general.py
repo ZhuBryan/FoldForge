@@ -5,7 +5,7 @@ packing (river bands shaded), its crease pattern (mountain/valley/border, spine
 creases thickened, sub-hub nodes ringed) and an honest Kawasaki / Maekawa / flap
 verdict. All four fold flat end to end (symmetric, mirror-symmetric and fully
 asymmetric single spines, plus the linear 3-hub caterpillar - thanks to the
-angle-aware packing; the caterpillar carries ~1% flap error on its far flaps).
+angle-aware packing; all four are exact on the folded-image flap measure).
 
     python examples/treemaker_river_general.py
 
