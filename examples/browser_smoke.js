@@ -328,6 +328,41 @@ const fs = require('fs');
   if (!(craneRelief.z > 0.1)) await fail('crane base did not fold (z-relief ' + craneRelief.z + ')');
   await page.screenshot({path: shotCrane});
 
+  // ---- exact multi-junction card (full Lang universal molecule): data marks exact,
+  //      flap error ~0 (folded-measured, not the 1.1% spine proxy), folds live ----
+  const mjInfo = await page.evaluate(() => {
+    const d = (DATA.designs || []).find(x => x.key === 'river-caterpillar');
+    return d ? { exact: !!d.exact, kaw: d.kawasaki, mae: d.maekawa, flat: d.flatFoldable,
+                 flaps: d.flaps, err: d.flapErr, closure: d.foldClosure } : null;
+  });
+  if (!mjInfo) await fail('river-caterpillar design not present in DATA.designs');
+  if (!(mjInfo.exact && mjInfo.kaw && mjInfo.mae && mjInfo.flat && mjInfo.flaps === 5))
+    await fail('multi-junction card not exact / not passing Kawasaki+Maekawa: ' + JSON.stringify(mjInfo));
+  if (!(mjInfo.err < 0.01 && mjInfo.closure < 1e-6))
+    await fail('multi-junction card flap error / fold closure not ~0: ' + JSON.stringify(mjInfo));
+  const mjClicked = await page.evaluate(() => {
+    for (const c of document.querySelectorAll('#designerlist .dcard'))
+      if (/Body \+ limbs \(multi-junction\)/.test(c.textContent) && /exact/.test(c.textContent)) { c.scrollIntoView({block: 'center'}); c.querySelector('button.dload').click(); return true; }
+    return false;
+  });
+  if (!mjClicked) await fail('multi-junction "Fold this base" button not found');
+  await new Promise(r => setTimeout(r, 700));
+  const mjStatus = await status();
+  if (!/^Folded .*Body \+ limbs \(multi-junction\)/.test(mjStatus)) await fail('multi-junction fold did not update status: ' + mjStatus);
+  if (!/exact, full Lang universal molecule/.test(mjStatus) || !/flap-length error 0\.00%/.test(mjStatus))
+    await fail('multi-junction status not exact / error not ~0: ' + mjStatus);
+  await setFold(1);
+  await new Promise(r => setTimeout(r, 1500));
+  const mjRelief = await page.evaluate(() => {
+    const p = geo.attributes.position.array; let zmin = 1e9, zmax = -1e9;
+    for (let k = 2; k < p.length; k += 3) { if (p[k] < zmin) zmin = p[k]; if (p[k] > zmax) zmax = p[k]; }
+    return { z: zmax - zmin, dynamic: !!(S && S.dynamic) };
+  });
+  if (!mjRelief.dynamic) await fail('multi-junction did not load as a live .fold model');
+  if (!(mjRelief.z > 0.1)) await fail('multi-junction base did not fold (z-relief ' + mjRelief.z + ')');
+  await page.screenshot({path: path.join(__dirname, 'output', 'studio_multijunction.png')});
+  console.log('multi-junction exact card:', JSON.stringify(mjInfo), 'z-relief', mjRelief.z.toFixed(2), '|', mjStatus);
+
   if (errs.length) await fail('uncaught page errors');
   console.log('OK — studio folds', path.basename(img),
     '| designer cards', dInfo.n, 'four-flap fold z-relief', dRelief.z.toFixed(2), '| designer shot', shotDesigner,

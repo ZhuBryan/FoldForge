@@ -427,6 +427,8 @@ DESIGN_SPECS = [
     ("five-flap", "Five-flap base", True),
     ("river-four", "River base (body + limbs)", True),
     ("river-mirror", "River base (uneven limbs)", True),
+    # multi-junction (limbs at 3 points): exact via the full Lang universal molecule
+    ("river-caterpillar", "Body + limbs (multi-junction)", True, True),
 ]
 
 _CP_COLORS = {"M": "#ff6b6b", "V": "#5b9bd5", "B": "#97a1b0", "F": "#5a6472"}
@@ -455,10 +457,14 @@ def _cp_svg(pattern, size=150, pad=10):
     return "data:image/svg+xml;base64," + base64.b64encode(raw).decode()
 
 
-def _bake_one_design(key, label, folds_flat):
+def _bake_one_design(key, label, folds_flat, lang=False):
     from foldforge.design import get_tree, design_base, flap_length_errors
     from foldforge.geometry.foldability import foldability_report
-    packing, pattern = design_base(get_tree(key))
+    if lang:     # full Lang universal molecule: exact for any tree
+        from foldforge.design.lang_molecule import lang_base
+        packing, pattern = lang_base(get_tree(key))
+    else:
+        packing, pattern = design_base(get_tree(key))
     report = foldability_report(pattern)
     err = flap_length_errors(packing, pattern)
     kawasaki = all(v.kawasaki is not False for v in report.vertices)
@@ -473,7 +479,7 @@ def _bake_one_design(key, label, folds_flat):
         "faces_vertices": [[int(i) for i in f] for f in pattern.faces],
         "metadata": {"name": "FoldForge " + label},
     }
-    return {
+    out = {
         "key": key, "label": label, "foldsFlat": bool(folds_flat),
         "flaps": int(len(packing.leaves)),
         "kawasaki": bool(kawasaki), "maekawa": bool(maekawa),
@@ -483,6 +489,10 @@ def _bake_one_design(key, label, folds_flat):
         "cp": _cp_svg(pattern),
         "fold": fold,
     }
+    if lang:   # flapErr above is lang's folded-measured flap error, not the spine proxy
+        out["exact"] = True
+        out["foldClosure"] = float(pattern.metadata["lang"]["fold_closure"])
+    return out
 
 
 def _bake_bird_base():
@@ -1465,7 +1475,7 @@ buildGallery();
 // PBD viewer .fold uploads use, so the design folds live; the flat crease
 // pattern (M red / V blue / B grey) and real stats show alongside it.
 function foldDesign(d){
-  const kind=d.classic?'traditional bird base, folding live':'circle-packed base, folding live';
+  const kind=d.classic?'traditional bird base, folding live':(d.exact?'exact Lang universal molecule, folding live':'circle-packed base, folding live');
   const shape=buildFoldShape(d.fold); shape.label=d.label+' — '+kind;
   DATA.shapes['__design']=shape;
   if(!DATA.order.includes('__design')){DATA.order.push('__design'); const o=document.createElement('option');o.value='__design';o.textContent=shape.label;sel.appendChild(o);}
@@ -1476,6 +1486,9 @@ function foldDesign(d){
     setStatus('Folded '+d.label+' — traditional bird base · '+d.vertsN+' vertices · '
       +d.edgesN+' creases · Kawasaki '+th(d.kawasaki)+' Maekawa '+th(d.maekawa)
       +' ('+d.interiorVerts+'/'+d.interiorVerts+' interior vertices) · the classic crane starts here','ok');
+  } else if(d.exact){
+    setStatus('Folded '+d.label+' — exact, full Lang universal molecule · '+d.flaps+' flaps · folds flat · Kawasaki '
+      +th(d.kawasaki)+' Maekawa '+th(d.maekawa)+' · flap-length error '+d.flapErr.toFixed(2)+'% (measured on the folded tree)','ok');
   } else {
     setStatus('Folded '+d.label+' — circle-packing (TreeMaker) base · '+d.flaps+' flaps · '
       +(d.foldsFlat?'folds flat':'partial fold')+' · Kawasaki '+th(d.kawasaki)+' Maekawa '+th(d.maekawa)
@@ -1498,6 +1511,11 @@ function buildDesigns(){
         +'<div class="dstat">Kawasaki '+th(d.kawasaki)+' · Maekawa '+th(d.maekawa)
         +' ('+d.interiorVerts+'/'+d.interiorVerts+' interior vertices)</div>'
         +'<div class="dstat" style="opacity:.75">the base — a finished crane adds head/tail reverse folds</div>';
+    } else if(d.exact){
+      meta.innerHTML='<b>'+d.label+'</b><span class="badge flat">exact · folds flat</span>'
+        +'<div class="dstat">exact — full Lang universal molecule</div>'
+        +'<div class="dstat">'+d.flaps+' flaps · flap error '+d.flapErr.toFixed(2)+'% (folded-measured)</div>'
+        +'<div class="dstat">Kawasaki '+th(d.kawasaki)+' · Maekawa '+th(d.maekawa)+'</div>';
     } else {
       meta.innerHTML='<b>'+d.label+'</b>'+badge
         +'<div class="dstat">'+d.flaps+' flaps · flap error '+d.flapErr.toFixed(2)+'%</div>'
