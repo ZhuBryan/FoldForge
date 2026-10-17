@@ -31,6 +31,14 @@ from foldforge.design.treemaker import (
     reduced_dist,
 )
 from foldforge.design.classic import bird_base
+from foldforge.design.origamizer import (
+    PolyTarget,
+    OrigamizerResult,
+    OrigamizerReport,
+    square_pyramid,
+    tetrahedron,
+    origamize_polyhedron,
+)
 from foldforge.design.skeleton import (
     tree_from_mask,
     tree_from_image,
@@ -61,6 +69,12 @@ __all__ = [
     "folded_schematic",
     "reduced_dist",
     "bird_base",
+    "PolyTarget",
+    "OrigamizerResult",
+    "OrigamizerReport",
+    "square_pyramid",
+    "tetrahedron",
+    "origamize_polyhedron",
     "tree_from_mask",
     "tree_from_image",
     "design_from_image",
