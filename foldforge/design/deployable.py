@@ -42,7 +42,6 @@ import numpy as np
 
 from foldforge.diff.miura import (
     flat_miura, folded_miura, fold_limit, footprint)
-from foldforge.diff.inverse import inverse_fit
 
 
 def _crease_edges(rows: int, cols: int) -> np.ndarray:
@@ -182,6 +181,10 @@ def inverse_design_deployed(target_wd, *, rows=6, cols=6, stow_frac=0.99,
     array is rigid-foldable by construction (it is a genuine Miura), so one
     actuator still deploys it and edge lengths are preserved across the sweep.
     """
+    # ponytail: lazy import breaks the cycle origamize.surface -> design ->
+    # deployable -> diff.inverse -> origamize.miura_fit -> origamize.surface.
+    from foldforge.diff.inverse import inverse_fit
+
     W, D = float(target_wd[0]), float(target_wd[1])
     target = (W, D, float(target_height))
     result, achieved = inverse_fit(target, rows=rows, cols=cols,
