@@ -31,6 +31,11 @@ from foldforge.design.treemaker import (
     reduced_dist,
 )
 from foldforge.design.classic import bird_base
+from foldforge.design.curved_crease import (
+    curved_fold,
+    concentric_pleat,
+    FoldedSurface,
+)
 from foldforge.design.skeleton import (
     tree_from_mask,
     tree_from_image,
@@ -67,6 +72,9 @@ __all__ = [
     "folded_schematic",
     "reduced_dist",
     "bird_base",
+    "curved_fold",
+    "concentric_pleat",
+    "FoldedSurface",
     "tree_from_mask",
     "tree_from_image",
     "design_from_image",
