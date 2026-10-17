@@ -38,8 +38,14 @@ from foldforge.design.skeleton import (
     TreeExtraction,
     PhotoDesign,
 )
+from foldforge.design.deployable import (
+    MiuraDeployable,
+    inverse_design_deployed,
+)
 
 __all__ = [
+    "MiuraDeployable",
+    "inverse_design_deployed",
     "fit_chain",
     "FitResult",
     "chamfer_distance",
