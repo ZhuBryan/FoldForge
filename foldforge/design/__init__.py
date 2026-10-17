@@ -36,6 +36,14 @@ from foldforge.design.curved_crease import (
     concentric_pleat,
     FoldedSurface,
 )
+from foldforge.design.origamizer import (
+    PolyTarget,
+    OrigamizerResult,
+    OrigamizerReport,
+    square_pyramid,
+    tetrahedron,
+    origamize_polyhedron,
+)
 from foldforge.design.skeleton import (
     tree_from_mask,
     tree_from_image,
@@ -75,6 +83,12 @@ __all__ = [
     "curved_fold",
     "concentric_pleat",
     "FoldedSurface",
+    "PolyTarget",
+    "OrigamizerResult",
+    "OrigamizerReport",
+    "square_pyramid",
+    "tetrahedron",
+    "origamize_polyhedron",
     "tree_from_mask",
     "tree_from_image",
     "design_from_image",
